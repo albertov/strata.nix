@@ -158,6 +158,21 @@ def pack_args(fam: dict) -> list:
     return list(fam.get("pack_args", []))
 
 
+def encoder_url(fam: dict) -> str:
+    """The family's image encoder (the mmproj file) at its pinned revision."""
+    raise NotImplementedError("encoder_url")
+
+
+def vision_args() -> list:
+    """The engine's arguments for images."""
+    raise NotImplementedError("vision_args")
+
+
+def vision_section(exe: str, mmproj: str, model: str) -> dict:
+    """The serve config's "vision" section: how it finds and starts the encoder."""
+    raise NotImplementedError("vision_section")
+
+
 def resident_budget_gib(quant: dict, ram: float) -> int:
     """The GiB of experts the engine keeps in RAM (--resident-budget-gib): the RAM less 24 GB for the OS,
     the engine and the file cache the other experts are read through, at most all of them, at least 8.

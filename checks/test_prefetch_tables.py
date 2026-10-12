@@ -126,6 +126,44 @@ check(prefetch.resident_budget_gib(prefetch.QUANTS["UD-Q6_K_XL"], 64) == 40,
 check(prefetch.resident_budget_gib(prefetch.QUANTS["UD-Q6_K_XL"], 188) == 101,
       "UD-Q6_K_XL on 188 GB: the budget is capped at all 101 GiB of its experts (every one in RAM)")
 
+# ---- images: the family's encoder (mmproj), its pinned URL, size and SHA-256 --------------------
+# From setup.py (FAMILIES[...]["mmproj_hf"] and ["mmproj"]) and from the Hub's own answers at those
+# revisions: HEAD /resolve/<rev>/<name> replies with x-linked-size and x-linked-etag.
+ENCODERS = {
+    "qwen": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+             907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
+    "swift": ("ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf",
+              907543520, "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60"),
+    "coder": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+              907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
+    # Unsloth only requantizes the original model, so it reads images with the original's encoder
+    "unsloth": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+                907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
+}
+
+for family, (repo, name, size, sha) in ENCODERS.items():
+    fam = prefetch.FAMILIES[family]
+    check(tuple(fam.get("encoder", ())) == (repo, name),
+          f"{family}: encoder is {fam.get('encoder')!r}, want {(repo, name)}")
+    check(prefetch.encoder_url(fam) == f"https://huggingface.co/{repo}/resolve/{HF_REVISIONS[repo]}/{name}",
+          f"{family}: bad encoder URL {prefetch.encoder_url(fam)}")
+    check(prefetch.SHA256.get(name) == (size, sha),
+          f"{family}: SHA256[{name}] is {prefetch.SHA256.get(name)!r}, the Hub has {(size, sha)}")
+
+# Swift is a different model with its own mmproj; picking the original's would encode images into a
+# embedding space the pack's tokenizer and projections do not speak
+check(ENCODERS["swift"][1] != ENCODERS["qwen"][1], "Swift ships its own mmproj; the original's is not it")
+
+# ---- the engine's --vision and serve's "vision" section (setup.py's VISION["gpu"] / cfg["vision"]) -
+check(prefetch.vision_args() == ["--vision", "--vram-reserve-mib", "700"],
+      f"vision args are {prefetch.vision_args()}, want the encoder asked for and its 700 MiB kept free")
+
+check(prefetch.vision_section("/nix/store/x/bin/strata-vision", "/var/lib/strata/models/m.gguf",
+                             "/var/lib/strata/models/s1.gguf")
+      == {"exe": "/nix/store/x/bin/strata-vision", "mmproj": "/var/lib/strata/models/m.gguf",
+          "model": "/var/lib/strata/models/s1.gguf", "gpu": True, "max_tokens": 1024},
+      f"the serve config's vision section is {prefetch.vision_section('a', 'b', 'c')}")
+
 if fails:
     print(f"prefetch tables: {len(fails)} FAILED")
     for f in fails:
