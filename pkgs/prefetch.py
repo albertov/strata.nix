@@ -188,13 +188,14 @@ def vision_args() -> list:
     return ["--vision", "--vram-reserve-mib", str(VISION_RESERVE_MIB)]
 
 
-def vision_section(exe: str, mmproj: str, model: str) -> dict:
+def vision_section(exe: str, mmproj: str, model: str, max_tokens: int = VISION_IMAGE_TOKENS) -> dict:
     """The serve config's "vision" section (setup.py's cfg["vision"] for a GPU encoder): serve keeps
     one `strata-vision` process alive, sends it `ENC <image> <out>` lines and hands the embeddings it
     writes to the engine as GENI.  `model` is shard 1: the encoder reads the vision start/end tokens
-    and the image size from the model itself."""
+    and the image size from the model itself.  `max_tokens` is the most image tokens one picture
+    becomes (serve passes it to strata-vision as --max-tokens)."""
     return {"exe": str(exe), "mmproj": str(mmproj), "model": str(model),
-            "gpu": True, "max_tokens": VISION_IMAGE_TOKENS}
+            "gpu": True, "max_tokens": VISION_IMAGE_TOKENS}   # STUB: the argument is not used yet
 
 
 def resident_budget_gib(quant: dict, ram: float) -> int:

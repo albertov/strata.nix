@@ -169,6 +169,37 @@ check(prefetch.vision_section("/nix/store/x/bin/strata-vision", "/var/lib/strata
           "model": "/var/lib/strata/models/s1.gguf", "gpu": True, "max_tokens": 1024},
       f"the serve config's vision section is {prefetch.vision_section('a', 'b', 'c')}")
 
+# ---- how big a picture the encoder may see (setup.py's --vision-tokens, its #625) ----------------
+# One image token is patch_size 16 x spatial_merge_size 2 = 32 x 32 px in this mmproj (read from its
+# GGUF header), so max_tokens is the picture's pixel budget: 1024 is 1.05 Mpx, which shrinks a
+# 2032x824 screenshot (1.67 Mpx) 1.26x and makes a line of 20 px text unreadable.  Upstream recommends
+# 1024 and caps nothing ("more than the encoder's default needs more VRAM and context per picture"),
+# and the encoder warms up AT the cap - the VRAM is spent whether or not a picture is ever sent, and
+# the engine, which starts after it, sizes its expert cache from what is left.
+check(prefetch.vision_section("a", "b", "c")["max_tokens"] == prefetch.VISION_IMAGE_TOKENS,
+      "with no cap asked for, serve gets the device default")
+check(prefetch.vision_section("a", "b", "c", 2048)["max_tokens"] == 2048,
+      f"the cap must reach serve: vision_section(a, b, c, 2048) is {prefetch.vision_section('a', 'b', 'c', 2048)}")
+
+
+def parses(argv: list):
+    """The parser, but a rejected flag is a failed check instead of a SystemExit out of the harness."""
+    try:
+        return prefetch.parser().parse_args(argv)
+    except SystemExit:
+        return None
+
+
+BASE = ["--family", "unsloth", "--model", "UD-IQ4_XS", "--data-dir", "/tmp/x"]
+asked = parses(BASE + ["--vision", "--vision-exe", "/nix/store/x/bin/strata-vision",
+                       "--vision-tokens", "2048"])
+check(asked is not None and getattr(asked, "vision_tokens", None) == 2048,
+      "--vision-tokens N is how the module says how big a picture the encoder may see")
+plain = parses(BASE)
+check(plain is not None and getattr(plain, "vision_tokens", "MISSING") is None,
+      "no --vision-tokens: prefetch's own default, so an unchanged service keeps upstream's 1024")
+
+
 # ---- extraEngineArgs: the flag form the module writes is the form the parser reads ---------------
 # The two halves live in different languages, so both are pinned here.  A bare `--extra-arg --flag`
 # is what the service on albertows3 was started with on 2026-10-12, and argparse answers "expected
@@ -177,6 +208,13 @@ check(prefetch.vision_section("/nix/store/x/bin/strata-vision", "/var/lib/strata
 mod = Path(os.environ["STRATA_MODULE"]).read_text(encoding="utf-8")
 check(re.search(r'--extra-arg=\$\{', mod) is not None,
       "nix/module.nix must write each extra engine argument as --extra-arg=${...}, not --extra-arg ${...}")
+
+# the same for the encoder's picture cap: the option is Nix, the flag is argparse, and only this file
+# reads both, so a typo on one side is caught here rather than on a machine that boots the service
+check(re.search(r'--vision-tokens \$\{toString cfg\.imageTokens\}', mod) is not None,
+      "nix/module.nix must pass imageTokens on as --vision-tokens ${toString cfg.imageTokens}")
+check(re.search(r'\(cfg\.images && cfg\.imageTokens != null\)', mod) is not None,
+      "imageTokens goes over only with images on: a cap without --vision would be a silent no-op")
 
 extra = prefetch.parser().parse_args(["--family", "qwen", "--model", "IQ2_XS", "--data-dir", "/tmp/x",
                                       "--extra-arg=--kv", "--extra-arg=q4_0",
