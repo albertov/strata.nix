@@ -10,7 +10,7 @@ in
     package = lib.mkPackageOption strataPkgs "strata" { };
 
     family = lib.mkOption {
-      type = lib.types.enum [ "qwen" "swift" "coder" ];
+      type = lib.types.enum [ "qwen" "swift" "coder" "unsloth"];
       default = "swift";
       description = ''
         Which model: `swift` (Swift 1.5, answers ~1.8x sooner for the same accuracy),
