@@ -19,7 +19,7 @@ in
     };
 
     model = lib.mkOption {
-      type = lib.types.enum [ "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M" ];
+      type = lib.types.enum [ "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M" "Q4_K_XL"];
       default = "IQ2_XS";
       description = ''
         Quantization size: Q2_0 (fastest), IQ2_XS (recommended), IQ3_XXS (better, slower),
