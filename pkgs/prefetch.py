@@ -59,7 +59,7 @@ FAMILIES = {
         "profile": "expert-profile-coder.bin",
     },
     "unsloth": {
-        "base": "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/main
+        "base": "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/main",
         "file": "Qwen3.8-Flash-Next-{q}-0000{i}-of-00004.gguf",
         "tag": "unsloth-",
         "name": "qwen3.8-flash-next-ud",
