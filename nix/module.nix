@@ -116,11 +116,27 @@ in
       description = ''
         Read images too: OpenAI `image_url` parts and Anthropic image blocks.  The service downloads
         the family's mmproj file (~0.9 GB) into its state directory and keeps one `strata-vision`
-        process alive beside the engine (from the package's passthru.vision); at 1024 image tokens
-        that encoder takes about 1.2 GB of VRAM, for which the engine keeps 700 MiB free.
+        process alive beside the engine (from the package's passthru.vision); at the default 1024
+        image tokens that encoder takes about 1.2 GB of VRAM, for which the engine keeps 700 MiB
+        free.  See `imageTokens` for how big a picture it is allowed to see.
         The Unsloth files and the Coder are requantizations of the original model, so they read
         images with the original's encoder.  Encoded pictures are cached by their hash, so a client
         that resends an image every turn pays for it once.
+      '';
+    };
+
+    imageTokens = lib.mkOption {
+      type = lib.types.nullOr lib.types.int;
+      default = null;
+      description = ''
+        The most image tokens one picture becomes (`strata-vision --max-tokens`).  Null: 1024, what
+        upstream's setup uses.  One image token is 32x32 px of picture in this encoder (patch 16,
+        spatial merge 2x2), so the cap is a pixel budget: 1024 tokens is 1.05 Mpx - a 2032x824
+        screenshot arrives shrunk 1.26x, which is what makes a line of small text unreadable - and
+        2048 is 2.10 Mpx, native for that screenshot and for a 1440p one.  The encoder warms up AT the
+        cap, so its VRAM is spent whether or not a client ever sends a picture, and the engine, which
+        starts after it, sizes its expert cache from what is left: on a card the engine already fills,
+        a bigger cap buys picture detail with decode speed.  Ignored with images = false.
       '';
     };
 
@@ -232,6 +248,8 @@ in
             --resident-budget-gib ${toString cfg.residentBudgetGiB} \
         '' + lib.optionalString cfg.images ''
             --vision --vision-exe ${lib.escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision \
+        '' + lib.optionalString (cfg.images && cfg.imageTokens != null) ''
+            --vision-tokens ${toString cfg.imageTokens} \
         '' + lib.optionalString (cfg.hfTokenFile != null) ''
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''

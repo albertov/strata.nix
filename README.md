@@ -75,6 +75,7 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). Not for the Unsloth files. |
 | `residentBudgetGiB` | `null` | Unsloth files: GiB of their experts the engine keeps in RAM; the rest are read from the SSD. Auto: RAM − 24 GB, capped at all of them. |
 | `images` | `false` | Read pictures (OpenAI `image_url`, Anthropic image blocks): fetches the model's mmproj (0.9 GB) and runs `strata-vision` beside the engine. |
+| `imageTokens` | `null` | Pictures: the most image tokens one picture becomes (`strata-vision --max-tokens`). Auto: 1024. One token is 32×32 px, so it is a pixel budget the encoder warms up at. |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, …). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
 | `extraEngineArgs` | `[ ]` | Extra engine arguments, one list element each (e.g. `[ "--kv" "q4_0" ]` → `--kv q4_0`). |
@@ -98,6 +99,15 @@ chat and through the API. It costs three things, none of them per turn:
 Upstream publishes image runs for the original model, Swift and the Coder, for `UD-IQ4_XS` (a regular
 choice) and for `UD-Q4_K_XL` (reported working, not tested by them); for `UD-Q6_K_XL` nothing is
 published either way, so treat that combination as untested.
+
+**How big a picture.** One image token is 32×32 px in this encoder (`clip.vision.patch_size` 16,
+`spatial_merge_size` 2×2), so `imageTokens` is a picture's pixel budget: the default 1024 tokens is
+1.05 Mpx, which shrinks a 2032×824 screenshot 1.26× — around where a 20 px line of text stops being
+readable — where 2048 is 2.10 Mpx (native for that screenshot, and for 1440p) and 4096 is 4.19 Mpx.
+The encoder warms up **at the cap**, so its VRAM is spent whether or not a client ever sends a
+picture, and the engine, which starts after it, sizes its expert cache from what is left: on a card
+the engine already fills, a bigger cap is paid for in decode speed. Upstream recommends 1024 and caps
+nothing — "more than the encoder's default needs more VRAM and context per picture".
 
 ## The Unsloth files
 

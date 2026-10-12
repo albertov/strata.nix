@@ -195,7 +195,7 @@ def vision_section(exe: str, mmproj: str, model: str, max_tokens: int = VISION_I
     and the image size from the model itself.  `max_tokens` is the most image tokens one picture
     becomes (serve passes it to strata-vision as --max-tokens)."""
     return {"exe": str(exe), "mmproj": str(mmproj), "model": str(model),
-            "gpu": True, "max_tokens": VISION_IMAGE_TOKENS}   # STUB: the argument is not used yet
+            "gpu": True, "max_tokens": int(max_tokens)}
 
 
 def resident_budget_gib(quant: dict, ram: float) -> int:
@@ -370,6 +370,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--vision", action="store_true",
                     help="images too: fetch the family's mmproj and give serve the encoder")
     ap.add_argument("--vision-exe", help="the strata-vision binary to encode images with (with --vision)")
+    ap.add_argument("--vision-tokens", type=int,
+                    help="the most image tokens one picture becomes (with --vision; default "
+                         f"{VISION_IMAGE_TOKENS}); 1 token is 32x32 px, so it is the picture's pixel budget")
     ap.add_argument("--emit-config")
     ap.add_argument("--engine")
     ap.add_argument("--host", default="127.0.0.1")
@@ -394,6 +397,10 @@ def main() -> int:
     if a.vision and not a.vision_exe:
         fail("--vision needs --vision-exe: the strata-vision binary reads the pictures",
              "the NixOS module passes the bundle's own (package.passthru.vision)")
+    if a.vision_tokens is not None and not a.vision:
+        fail("--vision-tokens is one of the image settings: --vision takes pictures in the first place")
+    if a.vision_tokens is not None and a.vision_tokens <= 0:
+        fail("--vision-tokens needs N > 0 (1 token is 32x32 px of picture)")
 
     data = Path(a.data_dir)
     models = data / "models"
@@ -451,8 +458,13 @@ def main() -> int:
         if mmproj.parent == models:
             download(encoder_url(fam), mmproj, "vision encoder", token=token)
         verify_sha256(mmproj)
-        vision = vision_section(a.vision_exe, mmproj, shard1)
+        tokens = VISION_IMAGE_TOKENS if a.vision_tokens is None else a.vision_tokens
+        vision = vision_section(a.vision_exe, mmproj, shard1, tokens)
         ok(f"images: {enc} encoded by {a.vision_exe}")
+        # the side of the largest square picture that reaches the encoder unshrunk: the number to look
+        # at when a line of small text came back unreadable (1 image token = 32x32 px)
+        ok(f"images: up to {tokens} image tokens per picture, the cap the encoder warms up at "
+           f"(a {int((tokens * 1024) ** 0.5)} px square fits at native size)")
 
     # the PLE table's shard: found by scanning the GGUF headers (shard 2 for qwen/coder, 1 for swift,
     # a shard of its own - 3 - for the Unsloth 6-bit file)
