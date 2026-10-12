@@ -354,6 +354,11 @@ def mem_total_gb() -> float:
     return 0.0
 
 
+def parser() -> argparse.ArgumentParser:
+    """The command line, apart from reading it (so the flag form the module writes is testable)."""
+    raise NotImplementedError("parser")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--family", default="swift", choices=sorted(FAMILIES))

@@ -14,6 +14,7 @@ stdenvNoCC.mkDerivation {
 
   buildCommand = ''
     export STRATA_SHARE=${strataPkg}/share/strata
+    export STRATA_MODULE=${../nix/module.nix}
     export PYTHONPATH=$STRATA_SHARE
     cp $src test_prefetch_tables.py
     ${strataPkg.passthru.py}/bin/python test_prefetch_tables.py

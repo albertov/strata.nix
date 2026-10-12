@@ -12,8 +12,10 @@ and from upstream's own tables (setup.py FAMILIES/MODELS/UNSLOTH_SHARDS) and doc
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
+from pathlib import Path
 
 import prefetch
 
@@ -166,6 +168,21 @@ check(prefetch.vision_section("/nix/store/x/bin/strata-vision", "/var/lib/strata
       == {"exe": "/nix/store/x/bin/strata-vision", "mmproj": "/var/lib/strata/models/m.gguf",
           "model": "/var/lib/strata/models/s1.gguf", "gpu": True, "max_tokens": 1024},
       f"the serve config's vision section is {prefetch.vision_section('a', 'b', 'c')}")
+
+# ---- extraEngineArgs: the flag form the module writes is the form the parser reads ---------------
+# The two halves live in different languages, so both are pinned here.  A bare `--extra-arg --flag`
+# is what the service on albertows3 was started with on 2026-10-12, and argparse answers "expected
+# one argument": a value that starts with -- reads as another flag, so systemd looped on a failed
+# preStart until the option was commented out.
+mod = Path(os.environ["STRATA_MODULE"]).read_text(encoding="utf-8")
+check(re.search(r'--extra-arg=\$\{', mod) is not None,
+      "nix/module.nix must write each extra engine argument as --extra-arg=${...}, not --extra-arg ${...}")
+
+extra = prefetch.parser().parse_args(["--family", "qwen", "--model", "IQ2_XS", "--data-dir", "/tmp/x",
+                                      "--extra-arg=--kv", "--extra-arg=q4_0",
+                                      "--extra-arg=--conversation-cache-mib", "--extra-arg=16384"]).extra_arg
+check(extra == ["--kv", "q4_0", "--conversation-cache-mib", "16384"],
+      f"the module's --extra-arg= form arrives at the parser as {extra}")
 
 if fails:
     print(f"prefetch tables: {len(fails)} FAILED")
