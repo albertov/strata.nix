@@ -58,6 +58,13 @@ FAMILIES = {
         "name": "qwen3.8-flash-next-coder",
         "profile": "expert-profile-coder.bin",
     },
+    "unsloth": {
+        "base": "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/main
+        "file": "Qwen3.8-Flash-Next-{q}-0000{i}-of-00004.gguf",
+        "tag": "unsloth-",
+        "name": "qwen3.8-flash-next-ud",
+        "profile": "expert-profile.bin",
+    }
 }
 
 QUANTS = {
@@ -66,7 +73,7 @@ QUANTS = {
     "IQ3_XXS": {"arena_gb": 42.9, "ram_gb": 60},
     "IQ3_S": {"arena_gb": 50.3, "ram_gb": 62, "families": ("qwen",)},
     "IQ1_M": {"arena_gb": 23.4, "ram_gb": 32, "families": ("coder",)},
-    "UD-Q4_K_XL": {"arena_gb": 64.0, "ram_gb": 98, "families": ("qwen",)}
+    "UD-Q4_K_XL": {"arena_gb": 64.0, "ram_gb": 98, "families": ("unsloth",)}
 }
 
 
