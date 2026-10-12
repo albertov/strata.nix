@@ -88,12 +88,35 @@
         ];
       };
 
+      # Eval only, never built: the Unsloth side of the module, so its shard/hash/budget tables and
+      # its assertions are evaluated with the rest of the flake.  Evaluate its preStart to see the
+      # exact prefetch command the service would run.
+      nixosConfigurations.strata-unsloth-eval = nixpkgs.lib.nixosSystem {
+        system = system;
+        modules = [
+          self.nixosModules.default
+          ({ ... }: {
+            boot.isContainer = true;
+            system.stateVersion = "26.11";
+            services.strata = {
+              enable = true;
+              family = "unsloth";
+              model = "UD-Q6_K_XL";
+              context = 8192;
+            };
+          })
+        ];
+      };
+
       checks.${system} = {
         serve-smoke = pkgs.callPackage ./checks/serve-smoke.nix {
           strataPkg = strataPkgs.strata;
         };
         module-vm = pkgs.callPackage ./checks/vm.nix {
           strataModule = self.nixosModules.default;
+        };
+        prefetch-tables = pkgs.callPackage ./checks/prefetch-tables.nix {
+          strataPkg = strataPkgs.strata;
         };
       };
 

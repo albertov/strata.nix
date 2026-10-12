@@ -17,7 +17,12 @@ as a native NixOS service, with an OpenAI- and Anthropic-compatible API on local
 
 - NixOS on **x86_64-linux** with an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more)
   and the official driver (580+). About 64 GB of RAM for IQ2_XS and below.
-- ~70 GB of free disk space for the model files (downloaded at first service start).
+- ~70 GB of free disk space for the model files (downloaded at first service start);
+  94-177 GB for the [Unsloth sizes](#the-unsloth-files) — an NVMe SSD there matters.
+
+The engine is compiled for `sm_120` (RTX 50) by default, so `nix build .#strata-engine` works on an
+RTX 5070/5090 out of the box; for another card override the architecture
+(`strata-engine.override { cudaArch = "89"; }` for RTX 40).
 
 ## Quick start
 
@@ -59,19 +64,52 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | --- | --- | --- |
 | `enable` | `false` | Enable the service. |
 | `package` | `strataPkgs.strata` | The strata-serve bundle (carries the engine). |
-| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original) or `coder` (half the experts, code-focused, ~32 GB RAM). |
-| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only). |
+| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original), `coder` (half the experts, code-focused, ~32 GB RAM) or `unsloth` (Unsloth's ~4-bit and 6-bit files). |
+| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only) / `UD-IQ4_XS` / `UD-Q4_K_XL` / `UD-Q6_K_XL` (unsloth only). |
 | `context` | `32768` | 8192–262144 tokens. |
 | `host` / `port` | `127.0.0.1` / `8080` | Listen address. |
 | `apiKeyFile` | `null` | Path to a file with the API key (systemd credential). Required when `host` is not loopback. |
 | `hfTokenFile` | `null` | Hugging Face token file, only for gated repos. |
 | `openFirewall` | `false` | Open the TCP port in the firewall. |
 | `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
-| `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). |
+| `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). Not for the Unsloth files. |
+| `residentBudgetGiB` | `null` | Unsloth files: GiB of their experts the engine keeps in RAM; the rest are read from the SSD. Auto: RAM − 24 GB, capped at all of them. |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, …). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
 | `extraEngineArgs` | `[ ]` | Extra engine arguments, e.g. `[ "--kv" "q4_0" ]`. |
 | `mockEngine` | `false` | Scripted mock instead of the model (tests; no GPU, no download). |
+
+## The Unsloth files
+
+`family = "unsloth"` takes Unsloth's own quantizations of the original model, the closest of them to
+the full weights. They are big, they keep their experts in the GGUF files (no `experts.bin`, so
+`lowRam` does not apply), and they need the engine's opt-in k-quant expert kernels — which
+`strata-engine` always builds (`STRATA_MMQ_KQUANTS`, `STRATA_Q6K_EXPERTS`). Their cost is ~1-3
+expert slots of VRAM for every other model on the same build, which is why upstream leaves them off.
+
+| Model | Download | Experts | Notes |
+| --- | ---: | ---: | --- |
+| `UD-IQ4_XS` | 93.7 GB (3 shards) | 59.5 GB | the regular ~4-bit choice: all of them in RAM from ~80 GB of RAM |
+| `UD-Q4_K_XL` | 111.3 GB (4 shards) | 77.0 GB | experimental upstream; 7-8.5 tokens/s on a 64 GB PC with a 12 GB card |
+| `UD-Q6_K_XL` | 169.2 GB (6 shards) | 109.2 GB | manual upstream (not in its setup's menu); 78 tokens/s measured with every expert in RAM; its PLE table is a Q8_0 54.4 GB shard the engine mmaps |
+
+```nix
+services.strata = {
+  enable = true;
+  family = "unsloth";
+  model = "UD-Q6_K_XL";
+  context = 8192;              # every GB of KV cache is a GB less of cached experts
+  gpus = [ 0 1 ];
+};
+```
+
+What the prefetch does for them: it fetches every shard at the pinned Hugging Face revision
+(`resolve/38bb39ee…/<quant>/`), checks each file's size **and published SHA-256** once (shard 1 is
+10,946,624 bytes in all three quantizations, so a size alone cannot tell them apart), packs with
+`--compat-bf16`, and gives the engine `--resident-budget-gib` — the RAM less 24 GB, capped at all of
+the experts (64 GB → 40 GiB, the measured setting in `docs/UNSLOTH_Q4.md`; from ~128 GB of RAM the
+cap is every expert, the state upstream's manual config reaches by leaving the flag out). Under the
+cap, the experts that do not fit are read from the SSD for every token: use an NVMe.
 
 Example with the original model, the best quant and a LAN-reachable API:
 
@@ -92,8 +130,11 @@ services.strata = {
 
 - `strata` — the server bundle: `strata-serve`, `strata-chat` and `strata-prefetch`
   (the download/prepare tool, usable standalone; `strata-prefetch --help`).
-- `strata-engine` — the CUDA inference binary, built from source
-  (`strata-engine.override { cudaArch = "120"; }` for an RTX 50 card; default `89` = RTX 40).
+- `strata-engine` — the CUDA inference binary, built from source.  Default
+  `cudaArch = "120"` (RTX 50); `strata-engine.override { cudaArch = "89"; }` for RTX 40.  It always
+  enables the k-quant expert kernels the Unsloth files need (`STRATA_MMQ_KQUANTS`,
+  `STRATA_Q6K_EXPERTS`), which upstream keeps opt-in because the extra kernel instances load eagerly
+  and cost other models a couple of expert slots of VRAM.
 - The model weights are **not** packaged: they are downloaded at runtime into the
   service's state directory (the nix store would not survive a 70 GB model well).
 
@@ -110,8 +151,10 @@ actually run — `nix flake lock --update-input strata` pulls new releases
 
 ## Testing
 
-- `nix flake check` — a serve smoke test (mock engine: HTTP endpoints without a GPU)
-  and a NixOS VM test of the systemd service with the mock engine.
+- `nix flake check` — a serve smoke test (mock engine: HTTP endpoints without a GPU), a NixOS VM
+  test of the systemd service with the mock engine, and `prefetch-tables`, which checks the download
+  tables offline against the names, sizes and SHA-256 the Hugging Face API gives at the pinned
+  revisions (a wrong subfolder or shard count would otherwise cost a 100-170 GB download first).
 - `nix build .#strata-engine` — the real compile (20-40 minutes, once, cached after).
 
 ## Licenses

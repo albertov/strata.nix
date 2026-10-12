@@ -2,6 +2,7 @@
 { pkgs, config, lib, ... }:
 let
   cfg = config.services.strata;
+  unslothModels = [ "UD-Q4_K_XL" "UD-IQ4_XS" "UD-Q6_K_XL" ];
 in
 {
   options.services.strata = {
@@ -14,16 +15,26 @@ in
       default = "swift";
       description = ''
         Which model: `swift` (Swift 1.5, answers ~1.8x sooner for the same accuracy),
-        `qwen` (the original Qwen3.8-Flash-Next) or `coder` (half the experts kept, code-focused).
+        `qwen` (the original Qwen3.8-Flash-Next), `coder` (half the experts kept, code-focused)
+        or `unsloth` (Unsloth's ~4-bit and 6-bit files: the closest to the full weights,
+        the biggest download).
       '';
     };
 
     model = lib.mkOption {
-      type = lib.types.enum [ "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M" "UD-Q4_K_XL"];
+      type = lib.types.enum [
+        "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M"
+        "UD-Q4_K_XL" "UD-IQ4_XS" "UD-Q6_K_XL"
+      ];
       default = "IQ2_XS";
       description = ''
         Quantization size: Q2_0 (fastest), IQ2_XS (recommended), IQ3_XXS (better, slower),
-        IQ3_S (best, qwen only, ~62 GB RAM), IQ1_M (coder only, ~32 GB RAM).
+        IQ3_S (best, qwen only, ~62 GB RAM), IQ1_M (coder only, ~32 GB RAM).  With
+        family = unsloth: UD-IQ4_XS (93.7 GB, their regular 4-bit), UD-Q4_K_XL (111.3 GB,
+        experimental upstream) or UD-Q6_K_XL (169.2 GB, manual upstream: the closest to the
+        full model, 78 tokens/s measured with its 101 GiB of experts in RAM and slower where
+        they come from the SSD).  Those three keep their experts in the GGUF files - no
+        experts.bin, so lowRam does not apply - and want an NVMe SSD.
       '';
     };
 
@@ -77,6 +88,18 @@ in
       description = ''
         Map the experts from the pack's experts.bin instead of copying them into RAM
         (needs a big GPU to stay fast). Null: automatic from the model's RAM needs.
+        Not available for the Unsloth files - see residentBudgetGiB.
+      '';
+    };
+
+    residentBudgetGiB = lib.mkOption {
+      type = lib.types.nullOr lib.types.int;
+      default = null;
+      description = ''
+        The Unsloth files only: how many GiB of their experts the engine keeps in RAM
+        (--resident-budget-gib); the rest are read from the SSD for every token. Null: the
+        machine's RAM less 24 GB, capped at all of them (64 GB: 40, the measured setting for
+        UD-Q4_K_XL in docs/UNSLOTH_Q4.md).
       '';
     };
 
@@ -130,6 +153,20 @@ in
         message = "services.strata: the coder family ships IQ1_M only; pick model = IQ1_M.";
       }
       {
+        assertion = !(lib.elem cfg.model unslothModels) || cfg.family == "unsloth";
+        message = "services.strata: ${cfg.model} is one of Unsloth's files: family = unsloth.";
+      }
+      {
+        assertion = cfg.family != "unsloth" || lib.elem cfg.model unslothModels;
+        message = "services.strata: family = unsloth takes model = UD-IQ4_XS, UD-Q4_K_XL or UD-Q6_K_XL.";
+      }
+      {
+        assertion = cfg.family != "unsloth" || cfg.lowRam != true;
+        message = ''
+          services.strata: the Unsloth files have no low-RAM mode - their experts stay in the GGUF
+          files and the engine reads them in place. Set residentBudgetGiB instead.'';
+      }
+      {
         assertion = cfg.host == "127.0.0.1" || cfg.host == "localhost" || cfg.apiKeyFile != null;
         message = "services.strata: exposing the API beyond loopback requires apiKeyFile.";
       }
@@ -167,6 +204,8 @@ in
             --data-dir "$state" \
         '' + lib.optionalString (cfg.lowRam != null) ''
             --low-ram ${if cfg.lowRam then "on" else "off"} \
+        '' + lib.optionalString (cfg.residentBudgetGiB != null) ''
+            --resident-budget-gib ${toString cfg.residentBudgetGiB} \
         '' + lib.optionalString (cfg.hfTokenFile != null) ''
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''
@@ -190,9 +229,10 @@ in
         DynamicUser = true;
         StateDirectory = "strata";
         StateDirectoryMode = "0750";
-        # First start: preStart downloads ~70 GB and builds the pack - the default
-        # 90 s TimeoutStartSec kills it mid-download (the service is resumable, but
-        # converge it in one pass). Applies to the start, incl. ExecStartPre.
+        # First start: preStart downloads the model files - ~70 GB for the ordinary sizes, up to
+        # 170 GB for the Unsloth ones - and builds the pack; the default TimeoutStartSec kills it
+        # mid-download (the service is resumable, but converge it in one pass). Applies to the
+        # start, incl. ExecStartPre.
         TimeoutStartSec = "0";
         WorkingDirectory = "%S/strata";
         UMask = "0077";

@@ -10,7 +10,7 @@
   version,
   ggmlPin,
   pinChecked ? true,
-  cudaArch ? "89",
+  cudaArch ? "120",
 }:
 
 assert pinChecked;
@@ -35,6 +35,13 @@ cudaPackages.backendStdenv.mkDerivation {
     "-DCMAKE_BUILD_TYPE=Release"
     "-DSTRATA_ENABLE_CUDA=ON"
     "-DSTRATA_BUILD_TESTS=OFF"
+    # The Unsloth files' experts (docs/UNSLOTH_Q4.md, docs/UNSLOTH_Q6.md): Q4_K/Q5_K/Q5_1/Q6_K
+    # gate/up in the grouped decode kernels and in the MMQ prompt kernels.  Upstream leaves both
+    # opt-in - every kernel instance is loaded at start (CUDA_MODULE_LOADING=EAGER), so they cost
+    # other models a couple of expert slots of VRAM - but without them the engine refuses those
+    # packs outright.  This build always has them: one engine binary for every model.
+    "-DSTRATA_MMQ_KQUANTS=ON"
+    "-DSTRATA_Q6K_EXPERTS=ON"
     "-DCMAKE_CUDA_ARCHITECTURES=${cudaArch}"
     "-DCMAKE_CUDA_COMPILER=${cudaPackages.cuda_nvcc}/bin/nvcc"
     "-DSTRATA_GGML_DIR=${llamaSrc}"
