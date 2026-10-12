@@ -66,7 +66,7 @@ QUANTS = {
     "IQ3_XXS": {"arena_gb": 42.9, "ram_gb": 60},
     "IQ3_S": {"arena_gb": 50.3, "ram_gb": 62, "families": ("qwen",)},
     "IQ1_M": {"arena_gb": 23.4, "ram_gb": 32, "families": ("coder",)},
-    "Q4_K_XL": {"arena_gb": 64.0, "ram_gb": 98, "families": ("qwen",)}
+    "UD-Q4_K_XL": {"arena_gb": 64.0, "ram_gb": 98, "families": ("qwen",)}
 }
 
 
