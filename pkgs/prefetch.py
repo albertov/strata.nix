@@ -51,6 +51,8 @@ HF_REVISIONS = {
 FAMILIES = {
     "qwen": {
         "repo": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+        # the image encoder (mmproj): llama.cpp's mtmd file for this model, at the revision this table pins
+        "encoder": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf"),
         "sub": "{q}/",
         "file": "Qwen3.8-Flash-Next-GSQ-RCO-{q}-0000{i}-of-0000{n}.gguf",
         "shards": 2,
@@ -60,6 +62,7 @@ FAMILIES = {
     },
     "swift": {
         "repo": "ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+        "encoder": ("ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf"),
         "sub": "",
         "file": "Swift-Qwen3.8-Flash-Next-GSQ-RCO-{q}-0000{i}-of-0000{n}.gguf",
         "shards": 2,
@@ -69,6 +72,7 @@ FAMILIES = {
     },
     "coder": {
         "repo": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF",
+        "encoder": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf"),
         "sub": "{q}/",
         "file": "Qwen3.8-Flash-Next-GSQ-RCO-{q}-0000{i}-of-0000{n}.gguf",
         "shards": 2,
@@ -82,6 +86,8 @@ FAMILIES = {
     # experts.bin, so --low-ram does not apply; the RAM that is short is covered by the budget below.
     "unsloth": {
         "repo": "unsloth/Qwen3.8-Flash-Next-GGUF",
+        # only a requantization of the original model, so it reads images with the original's encoder
+        "encoder": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf"),
         "sub": "{q}/",
         "file": "Qwen3.8-Flash-Next-{q}-0000{i}-of-0000{n}.gguf",
         "pack_args": ["--compat-bf16"],
@@ -134,6 +140,12 @@ SHA256 = {
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00004-of-00006.gguf": (49814108512, "0ea4b599880a5a52fcd9c188ba1443f646c69c96571904ddbd6a79246a01a997"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00005-of-00006.gguf": (49419317344, "9948e81ae8368144b135a7403d8c0f2cf9a6c2f9f692313865855b2832e696c9"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00006-of-00006.gguf": (14838313984, "e4ae255234f42b18012f6d6eec5bf615b57479b7e0a0233c47436a321ffeec3f"),
+    # The image encoders (setup.py's MMPROJ / FAMILIES[...]["mmproj"]) at the pinned revisions of the
+    # repositories that publish them: qwen, coder and unsloth share one file (byte for byte, as the Hub
+    # hashes show) and Swift has its own.  The coder's and unsloth's rows live in the same table under
+    # this name on purpose: the same file from any of the three repositories must hash the same.
+    "mmproj-Qwen3.8-Flash-Next-BF16.gguf": (907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
+    "mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf": (907543520, "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60"),
 }
 
 UNSLOTH_RAM_LEFT_GB = 24   # RAM beside the budget: the OS, the engine, and the file cache the rest reads through
@@ -159,18 +171,30 @@ def pack_args(fam: dict) -> list:
 
 
 def encoder_url(fam: dict) -> str:
-    """The family's image encoder (the mmproj file) at its pinned revision."""
-    raise NotImplementedError("encoder_url")
+    """The family's image encoder (its mmproj file) at the pinned revision of the repository that
+    publishes it - for the Unsloth files and the Coder, the original model's repository."""
+    repo, name = fam["encoder"]
+    return f"https://huggingface.co/{repo}/resolve/{HF_REVISIONS[repo]}/{name}"
+
+
+# The image encoder on the GPU (setup.py's VISION["gpu"]): it warms up before the engine - about 1.2 GB
+# at 1024 image tokens - so the engine sizes its expert slots around the 700 MiB kept free for it.
+VISION_IMAGE_TOKENS = 1024
+VISION_RESERVE_MIB = 700
 
 
 def vision_args() -> list:
-    """The engine's arguments for images."""
-    raise NotImplementedError("vision_args")
+    """The engine's arguments for images: accept GENI requests, and keep the encoder's VRAM free."""
+    return ["--vision", "--vram-reserve-mib", str(VISION_RESERVE_MIB)]
 
 
 def vision_section(exe: str, mmproj: str, model: str) -> dict:
-    """The serve config's "vision" section: how it finds and starts the encoder."""
-    raise NotImplementedError("vision_section")
+    """The serve config's "vision" section (setup.py's cfg["vision"] for a GPU encoder): serve keeps
+    one `strata-vision` process alive, sends it `ENC <image> <out>` lines and hands the embeddings it
+    writes to the engine as GENI.  `model` is shard 1: the encoder reads the vision start/end tokens
+    and the image size from the model itself."""
+    return {"exe": str(exe), "mmproj": str(mmproj), "model": str(model),
+            "gpu": True, "max_tokens": VISION_IMAGE_TOKENS}
 
 
 def resident_budget_gib(quant: dict, ram: float) -> int:
@@ -340,6 +364,9 @@ def main() -> int:
     ap.add_argument("--low-ram", choices=["on", "off"], help="default: on when the experts would not fit the RAM")
     ap.add_argument("--resident-budget-gib", type=int,
                     help="GiB of experts the engine keeps in RAM (the Unsloth files; default: the RAM less 24 GB)")
+    ap.add_argument("--vision", action="store_true",
+                    help="images too: fetch the family's mmproj and give serve the encoder")
+    ap.add_argument("--vision-exe", help="the strata-vision binary to encode images with (with --vision)")
     ap.add_argument("--emit-config")
     ap.add_argument("--engine")
     ap.add_argument("--host", default="127.0.0.1")
@@ -356,6 +383,9 @@ def main() -> int:
     allowed = quant.get("families") or tuple(FAMILIES)
     if a.family not in allowed:
         fail(f"{a.model} is only published for: {', '.join(allowed)} (not {a.family})")
+    if a.vision and not a.vision_exe:
+        fail("--vision needs --vision-exe: the strata-vision binary reads the pictures",
+             "the NixOS module passes the bundle's own (package.passthru.vision)")
 
     data = Path(a.data_dir)
     models = data / "models"
@@ -395,8 +425,8 @@ def main() -> int:
         if low_ram == "auto":
             low_ram = "on" if ram < quant["ram_gb"] else "off"
 
+    token = Path(a.hf_token_file).read_text(encoding="utf-8").strip() if a.hf_token_file else None
     if not a.gguf_dir:
-        token = Path(a.hf_token_file).read_text(encoding="utf-8").strip() if a.hf_token_file else None
         for i, (n, s) in enumerate(zip(names, shards), 1):
             download(shard_url(fam, a.model, n), s, f"{a.family}/{a.model} shard {i}/{len(names)}", token=token)
 
@@ -404,6 +434,17 @@ def main() -> int:
     for s in shards:
         check_shard(s)      # whole and readable: cheap, so it comes before the hash
         verify_sha256(s)    # the Hub's published hash, once per file
+
+    # the image encoder: 0.9 GB, hashed like a shard, and only wanted when the service takes pictures
+    vision = None
+    if a.vision:
+        enc = fam["encoder"][1]
+        mmproj = (gdir if a.gguf_dir and (gdir / enc).is_file() else models) / enc
+        if mmproj.parent == models:
+            download(encoder_url(fam), mmproj, "vision encoder", token=token)
+        verify_sha256(mmproj)
+        vision = vision_section(a.vision_exe, mmproj, shard1)
+        ok(f"images: {enc} encoded by {a.vision_exe}")
 
     # the PLE table's shard: found by scanning the GGUF headers (shard 2 for qwen/coder, 1 for swift,
     # a shard of its own - 3 - for the Unsloth 6-bit file)
@@ -457,10 +498,14 @@ def main() -> int:
         args += ["--kv-resident", "32768"]
     if low_ram == "on":
         args += ["--mmap-experts"]
+    if vision:
+        args += vision_args()
     args += a.extra_arg
 
     prepared = {"args": args, "tokenizer": str(pack / "tokenizer"), "model_name": quant.get("name", fam["name"]),
                 "context": a.context, "low_ram": low_ram == "on", "budget_gib": budget}
+    if vision:
+        prepared["vision"] = vision
     (data / f"prepared-{fam['tag'].lower()}{a.model.lower()}.json").write_text(json.dumps(prepared, indent=1),
                                                                               encoding="utf-8")
     ok(f"prepared: pack={pack} mtp={rt} context={a.context}")
@@ -471,6 +516,8 @@ def main() -> int:
         cfg = {"exe": a.engine, "args": args, "tokenizer": prepared["tokenizer"],
                "model_name": prepared["model_name"],
                "log": str(data / f"engine-{fam['tag'].lower()}{a.model.lower()}.log")}
+        if vision:
+            cfg["vision"] = vision          # serve keeps strata-vision alive and routes image parts through it
         if a.host:
             cfg["host"] = a.host
         if a.gpu:

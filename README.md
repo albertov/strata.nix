@@ -74,10 +74,30 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
 | `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). Not for the Unsloth files. |
 | `residentBudgetGiB` | `null` | Unsloth files: GiB of their experts the engine keeps in RAM; the rest are read from the SSD. Auto: RAM − 24 GB, capped at all of them. |
+| `images` | `false` | Read pictures (OpenAI `image_url`, Anthropic image blocks): fetches the model's mmproj (0.9 GB) and runs `strata-vision` beside the engine. |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, …). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
 | `extraEngineArgs` | `[ ]` | Extra engine arguments, e.g. `[ "--kv" "q4_0" ]`. |
 | `mockEngine` | `false` | Scripted mock instead of the model (tests; no GPU, no download). |
+
+## Images
+
+`images = true` takes pictures: OpenAI's `image_url` parts and Anthropic's image blocks, in the web
+chat and through the API. It costs three things, none of them per turn:
+
+- **0.9 GB** more on disk: the family's `mmproj-*.gguf`, fetched at a pinned revision and checked
+  against its published SHA-256 like every other file. The Coder and the Unsloth files are
+  requantizations of the original model and use its encoder; only Swift 1.5 has one of its own.
+- **~1.2 GB of VRAM** at 1024 image tokens: `strata-serve` keeps one `strata-vision` process alive
+  beside the engine, and the engine is told to keep 700 MiB free for it (`--vram-reserve-mib`).
+  A GPU encoder is what this build makes; on a card near 12 GB it is worth reading prompts without
+  it (`--vision cpu` upstream, ~2-3 s per picture there).
+- nothing per request for a picture a client resends every turn: the encoder caches by the image's
+  hash.
+
+Upstream publishes image runs for the original model, Swift and the Coder, for `UD-IQ4_XS` (a regular
+choice) and for `UD-Q4_K_XL` (reported working, not tested by them); for `UD-Q6_K_XL` nothing is
+published either way, so treat that combination as untested.
 
 ## The Unsloth files
 
@@ -135,6 +155,10 @@ services.strata = {
   enables the k-quant expert kernels the Unsloth files need (`STRATA_MMQ_KQUANTS`,
   `STRATA_Q6K_EXPERTS`), which upstream keeps opt-in because the extra kernel instances load eagerly
   and cost other models a couple of expert slots of VRAM.
+- `strata-vision` — the image encoder (llama.cpp's mtmd at the same pinned llama.cpp, with ggml-cuda),
+  for `images = true`. The bundle carries it under `passthru.vision`, so nothing builds it until a
+  service asks for images; the build is `STRATA_PORTABLE=ON` on purpose — a `-march=native` encoder
+  built on one PC dies with an illegal instruction on another (#411 #412 #419).
 - The model weights are **not** packaged: they are downloaded at runtime into the
   service's state directory (the nix store would not survive a 70 GB model well).
 
@@ -154,8 +178,10 @@ actually run — `nix flake lock --update-input strata` pulls new releases
 - `nix flake check` — a serve smoke test (mock engine: HTTP endpoints without a GPU), a NixOS VM
   test of the systemd service with the mock engine, and `prefetch-tables`, which checks the download
   tables offline against the names, sizes and SHA-256 the Hugging Face API gives at the pinned
-  revisions (a wrong subfolder or shard count would otherwise cost a 100-170 GB download first).
+  revisions (a wrong subfolder or shard count would otherwise cost a 100-170 GB download first). The
+  same check covers the image encoders' names, sizes and hashes.
 - `nix build .#strata-engine` — the real compile (20-40 minutes, once, cached after).
+- `nix build .#strata-vision` — the image encoder, for `images = true` (it builds ggml-cuda again).
 
 ## Licenses
 

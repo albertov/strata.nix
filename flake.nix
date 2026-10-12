@@ -46,6 +46,7 @@
     {
       overlays.default = final: prev: {
         strata-engine = strataPkgs.strata-engine;
+        strata-vision = strataPkgs.strata-vision;
         strata-serve = strataPkgs.strata-serve;
         strata = strataPkgs.strata;
       };
@@ -57,11 +58,18 @@
           llamaSrc = llama-pinned;
         };
 
+        strata-vision = pkgs.callPackage ./pkgs/vision.nix {
+          inherit version pinChecked;
+          src = inputs.strata;
+          llamaSrc = llama-pinned;
+        };
+
         strata-serve = pkgs.callPackage ./pkgs/serve.nix {
           inherit version pinChecked;
           strataSrc = inputs.strata;
           llamaSrc = llama-pinned;
           engine = strata-engine;
+          vision = strata-vision;
         };
 
         strata = strata-serve;
@@ -103,6 +111,26 @@
               family = "unsloth";
               model = "UD-Q6_K_XL";
               context = 8192;
+            };
+          })
+        ];
+      };
+
+      # Eval only, never built: the image side of the module (the encoder's flags, the mmproj fetch and
+      # the passthru.vision assertion), so it evaluates with the rest of the flake.  Evaluate its
+      # preStart to see the exact prefetch command, including --vision-exe.
+      nixosConfigurations.strata-images-eval = nixpkgs.lib.nixosSystem {
+        system = system;
+        modules = [
+          self.nixosModules.default
+          ({ ... }: {
+            boot.isContainer = true;
+            system.stateVersion = "26.11";
+            services.strata = {
+              enable = true;
+              family = "unsloth";
+              model = "UD-IQ4_XS";
+              images = true;
             };
           })
         ];

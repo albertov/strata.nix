@@ -6,6 +6,7 @@
   strataSrc,
   llamaSrc,
   engine,
+  vision,
   version,
   pinChecked ? true,
 }:
@@ -63,6 +64,9 @@ stdenvNoCC.mkDerivation {
 
   passthru = {
     engine = engine;
+    # the image encoder, for a service with images = true: a passthru, so nothing builds it until
+    # something (the module's preStart) actually asks for it
+    vision = vision;
     inherit share py;
     prefetchFlags = { };
   };

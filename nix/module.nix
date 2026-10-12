@@ -110,6 +110,20 @@ in
       description = "Sampling defaults for requests that leave the fields out.";
     };
 
+    images = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Read images too: OpenAI `image_url` parts and Anthropic image blocks.  The service downloads
+        the family's mmproj file (~0.9 GB) into its state directory and keeps one `strata-vision`
+        process alive beside the engine (from the package's passthru.vision); at 1024 image tokens
+        that encoder takes about 1.2 GB of VRAM, for which the engine keeps 700 MiB free.
+        The Unsloth files and the Coder are requantizations of the original model, so they read
+        images with the original's encoder.  Encoded pictures are cached by their hash, so a client
+        that resends an image every turn pays for it once.
+      '';
+    };
+
     mcpServers = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
@@ -178,6 +192,12 @@ in
         assertion = cfg.mockEngine || (cfg.package ? passthru.engine);
         message = "services.strata: package must be the strata-serve bundle (it carries the engine under passthru.engine).";
       }
+      {
+        assertion = !cfg.images || cfg.mockEngine || (cfg.package ? passthru.vision);
+        message = ''
+          services.strata: images need a bundle that carries the image encoder (passthru.vision);
+          the flake's `strata` package does, one built without it does not.'';
+      }
     ];
 
     systemd.services.strata = {
@@ -206,6 +226,8 @@ in
             --low-ram ${if cfg.lowRam then "on" else "off"} \
         '' + lib.optionalString (cfg.residentBudgetGiB != null) ''
             --resident-budget-gib ${toString cfg.residentBudgetGiB} \
+        '' + lib.optionalString cfg.images ''
+            --vision --vision-exe ${lib.escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision \
         '' + lib.optionalString (cfg.hfTokenFile != null) ''
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''

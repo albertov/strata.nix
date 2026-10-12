@@ -142,10 +142,13 @@ ENCODERS = {
 }
 
 for family, (repo, name, size, sha) in ENCODERS.items():
+    rev = {"ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF": REV_QWEN,
+           "ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF": REV_SWIFT,
+           "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF": REV_CODER}[repo]
     fam = prefetch.FAMILIES[family]
     check(tuple(fam.get("encoder", ())) == (repo, name),
           f"{family}: encoder is {fam.get('encoder')!r}, want {(repo, name)}")
-    check(prefetch.encoder_url(fam) == f"https://huggingface.co/{repo}/resolve/{HF_REVISIONS[repo]}/{name}",
+    check(prefetch.encoder_url(fam) == f"https://huggingface.co/{repo}/resolve/{rev}/{name}",
           f"{family}: bad encoder URL {prefetch.encoder_url(fam)}")
     check(prefetch.SHA256.get(name) == (size, sha),
           f"{family}: SHA256[{name}] is {prefetch.SHA256.get(name)!r}, the Hub has {(size, sha)}")
