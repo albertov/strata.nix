@@ -131,6 +131,7 @@
               family = "unsloth";
               model = "UD-IQ4_XS";
               images = true;
+              extraEngineArgs = [ "--conversation-cache-mib" "16384" ];
             };
           })
         ];

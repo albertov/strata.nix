@@ -213,6 +213,10 @@ in
         CUDA_VISIBLE_DEVICES = lib.concatStringsSep "," cfg.gpus;
       };
 
+      # Each extra engine argument goes over as --extra-arg=VALUE, with the equals sign: a bare
+      # `--extra-arg --flag` makes argparse stop with "expected one argument", because the value looks
+      # like another flag - which is why every argument starting with -- used to fail here.  The comment
+      # cannot live inside the command string below: it would land in the generated script.
       preStart = lib.mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (toString (
         pkgs.writeShellScript "strata-prestart" (''
           set -euo pipefail
@@ -242,7 +246,7 @@ in
             --sampling-json ${pkgs.writeText "strata-sampling.json" (builtins.toJSON cfg.sampling)} \
         '' + lib.optionalString (cfg.mcpServers != { }) ''
             --mcp-json ${pkgs.writeText "strata-mcp.json" (builtins.toJSON cfg.mcpServers)} \
-        '' + lib.concatMapStrings (x: ''--extra-arg ${lib.escapeShellArg x} '') cfg.extraEngineArgs
+        '' + lib.concatMapStrings (x: ''--extra-arg=${lib.escapeShellArg x} '') cfg.extraEngineArgs
         )
       ));
 

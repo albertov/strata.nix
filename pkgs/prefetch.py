@@ -355,11 +355,8 @@ def mem_total_gb() -> float:
 
 
 def parser() -> argparse.ArgumentParser:
-    """The command line, apart from reading it (so the flag form the module writes is testable)."""
-    raise NotImplementedError("parser")
-
-
-def main() -> int:
+    """The command line, apart from reading it: the module writes these flags from Nix, and the form of
+    --extra-arg (a value that starts with --) is something both sides have to agree on."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--family", default="swift", choices=sorted(FAMILIES))
     ap.add_argument("--model", default="IQ2_XS", choices=sorted(QUANTS))
@@ -381,8 +378,13 @@ def main() -> int:
     ap.add_argument("--hf-token-file")
     ap.add_argument("--sampling-json")
     ap.add_argument("--mcp-json")
+    # --extra-arg=VALUE: argparse takes the rest of the word as the value, so VALUE may start with --
     ap.add_argument("--extra-arg", action="append", default=[])
-    a = ap.parse_args()
+    return ap
+
+
+def main() -> int:
+    a = parser().parse_args()
 
     fam, quant = FAMILIES[a.family], QUANTS[a.model]
     allowed = quant.get("families") or tuple(FAMILIES)
