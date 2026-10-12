@@ -77,7 +77,7 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `images` | `false` | Read pictures (OpenAI `image_url`, Anthropic image blocks): fetches the model's mmproj (0.9 GB) and runs `strata-vision` beside the engine. |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, …). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
-| `extraEngineArgs` | `[ ]` | Extra engine arguments, e.g. `[ "--kv" "q4_0" ]`. |
+| `extraEngineArgs` | `[ ]` | Extra engine arguments, one list element each (e.g. `[ "--kv" "q4_0" ]` → `--kv q4_0`). |
 | `mockEngine` | `false` | Scripted mock instead of the model (tests; no GPU, no download). |
 
 ## Images
