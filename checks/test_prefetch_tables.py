@@ -36,10 +36,20 @@ UNSLOTH = {
         93_682_584_224,
         [f"Qwen3.8-Flash-Next-UD-IQ4_XS-0000{i}-of-00003.gguf" for i in (1, 2, 3)],
     ),
+    "UD-Q5_K_XL": (
+        f"https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/{REV_UNSLOTH}/UD-Q5_K_XL/",
+        158_286_406_650,
+        [f"Qwen3.8-Flash-Next-UD-Q5_K_XL-0000{i}-of-00006.gguf" for i in range(1, 7)],
+    ),
     "UD-Q6_K_XL": (
         f"https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/{REV_UNSLOTH}/UD-Q6_K_XL/",
         169_165_382_688,
         [f"Qwen3.8-Flash-Next-UD-Q6_K_XL-0000{i}-of-00006.gguf" for i in range(1, 7)],
+    ),
+    "Q8_0": (
+        f"https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/{REV_UNSLOTH}/Q8_0/",
+        188_225_033_248,
+        [f"Qwen3.8-Flash-Next-Q8_0-0000{i}-of-00006.gguf" for i in range(1, 7)],
     ),
 }
 
@@ -128,6 +138,20 @@ check(prefetch.resident_budget_gib(prefetch.QUANTS["UD-Q6_K_XL"], 64) == 40,
 check(prefetch.resident_budget_gib(prefetch.QUANTS["UD-Q6_K_XL"], 188) == 101,
       "UD-Q6_K_XL on 188 GB: the budget is capped at all 101 GiB of its experts (every one in RAM)")
 
+
+def budget(quant: str, ram: float):
+    """The budget, or None when the quant is not in the table (so the failure names it)."""
+    q = prefetch.QUANTS.get(quant)
+    return None if q is None else prefetch.resident_budget_gib(q, ram)
+
+
+check(budget("UD-Q5_K_XL", 128) == 91,
+      "UD-Q5_K_XL on 128 GB: at most all 91 GiB of its experts")
+check(budget("Q8_0", 128) == 104,
+      "Q8_0 on 128 GB: 104 of its 119 GiB of experts in RAM, the rest read from the SSD")
+check(budget("Q8_0", 192) == 119,
+      "Q8_0 on 192 GB: the budget is capped at all 119 GiB of its experts (every one in RAM)")
+
 # ---- images: the family's encoder (mmproj), its pinned URL, size and SHA-256 --------------------
 # From setup.py (FAMILIES[...]["mmproj_hf"] and ["mmproj"]) and from the Hub's own answers at those
 # revisions: HEAD /resolve/<rev>/<name> replies with x-linked-size and x-linked-etag.
@@ -206,6 +230,20 @@ check(plain is not None and getattr(plain, "vision_tokens", "MISSING") is None,
 # one argument": a value that starts with -- reads as another flag, so systemd looped on a failed
 # preStart until the option was commented out.
 mod = Path(os.environ["STRATA_MODULE"]).read_text(encoding="utf-8")
+
+# ---- every Unsloth file the prefetch ships is selectable in the NixOS module --------------------
+model_enum = re.search(r"model = lib\.mkOption \{\s*type = lib\.types\.enum \[(.*?)\];", mod, re.S)
+check(model_enum is not None, "nix/module.nix: model = lib.mkOption with a types.enum list not found")
+unsloth_models = re.search(r"unslothModels = \[(.*?)\];", mod, re.S)
+check(unsloth_models is not None, "nix/module.nix: unslothModels list not found")
+for quant in UNSLOTH:
+    if model_enum is not None:
+        check(re.search(rf'"{re.escape(quant)}"', model_enum.group(1)) is not None,
+              f"{quant}: nix/module.nix's model enum must offer it")
+    if unsloth_models is not None:
+        check(re.search(rf'"{re.escape(quant)}"', unsloth_models.group(1)) is not None,
+              f"{quant}: nix/module.nix's unslothModels list must include it")
+
 check(re.search(r'--extra-arg=\$\{', mod) is not None,
       "nix/module.nix must write each extra engine argument as --extra-arg=${...}, not --extra-arg ${...}")
 
