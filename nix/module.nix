@@ -2,7 +2,7 @@
 { pkgs, config, lib, ... }:
 let
   cfg = config.services.strata;
-  unslothModels = [ "UD-Q4_K_XL" "UD-IQ4_XS" "UD-Q6_K_XL" ];
+  unslothModels = [ "UD-IQ4_XS" "UD-Q4_K_XL" "UD-Q5_K_XL" "UD-Q6_K_XL" "Q8_0" ];
 in
 {
   options.services.strata = {
@@ -16,7 +16,7 @@ in
       description = ''
         Which model: `swift` (Swift 1.5, answers ~1.8x sooner for the same accuracy),
         `qwen` (the original Qwen3.8-Flash-Next), `coder` (half the experts kept, code-focused)
-        or `unsloth` (Unsloth's ~4-bit and 6-bit files: the closest to the full weights,
+        or `unsloth` (Unsloth's 4- to 8-bit files: the closest to the full weights,
         the biggest download).
       '';
     };
@@ -24,17 +24,19 @@ in
     model = lib.mkOption {
       type = lib.types.enum [
         "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M"
-        "UD-Q4_K_XL" "UD-IQ4_XS" "UD-Q6_K_XL"
+        "UD-IQ4_XS" "UD-Q4_K_XL" "UD-Q5_K_XL" "UD-Q6_K_XL" "Q8_0"
       ];
       default = "IQ2_XS";
       description = ''
         Quantization size: Q2_0 (fastest), IQ2_XS (recommended), IQ3_XXS (better, slower),
         IQ3_S (best, qwen only, ~62 GB RAM), IQ1_M (coder only, ~32 GB RAM).  With
-        family = unsloth: UD-IQ4_XS (93.7 GB, their regular 4-bit), UD-Q4_K_XL (111.3 GB,
-        experimental upstream) or UD-Q6_K_XL (169.2 GB, manual upstream: the closest to the
-        full model, 78 tokens/s measured with its 101 GiB of experts in RAM and slower where
-        they come from the SSD).  Those three keep their experts in the GGUF files - no
-        experts.bin, so lowRam does not apply - and want an NVMe SSD.
+        family = unsloth: UD-IQ4_XS (93.7 GB, their regular 4-bit), UD-Q4_K_XL (111.3 GB),
+        UD-Q5_K_XL (158.3 GB), UD-Q6_K_XL (169.2 GB) or Q8_0 (188.2 GB, every expert at 8
+        bits: the reference quality; its 119 GiB of experts all fit in RAM from ~144 GB,
+        else part of them are read from the SSD).  UD-Q5_K_XL and UD-Q6_K_XL come closest to
+        the full model (78 tokens/s measured for UD-Q6_K_XL with its 101 GiB of experts in
+        RAM).  All five keep their experts in the GGUF files - no experts.bin, so lowRam
+        does not apply - and want an NVMe SSD.
       '';
     };
 
@@ -99,7 +101,7 @@ in
         The Unsloth files only: how many GiB of their experts the engine keeps in RAM
         (--resident-budget-gib); the rest are read from the SSD for every token. Null: the
         machine's RAM less 24 GB, capped at all of them (64 GB: 40, the measured setting for
-        UD-Q4_K_XL in docs/UNSLOTH_Q4.md).
+        UD-Q4_K_XL in docs/UNSLOTH_Q4.md; from ~144 GB: every one of Q8_0's 119 GiB).
       '';
     };
 
@@ -188,7 +190,7 @@ in
       }
       {
         assertion = cfg.family != "unsloth" || lib.elem cfg.model unslothModels;
-        message = "services.strata: family = unsloth takes model = UD-IQ4_XS, UD-Q4_K_XL or UD-Q6_K_XL.";
+        message = "services.strata: family = unsloth takes model = UD-IQ4_XS, UD-Q4_K_XL, UD-Q5_K_XL, UD-Q6_K_XL or Q8_0.";
       }
       {
         assertion = cfg.family != "unsloth" || cfg.lowRam != true;

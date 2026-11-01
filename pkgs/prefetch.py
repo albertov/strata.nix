@@ -114,18 +114,30 @@ QUANTS = {
     # them in RAM from ~80 GB of RAM on
     "UD-IQ4_XS": {"arena_gb": 59.5, "ram_gb": 48, "families": ("unsloth",), "budget": True, "shards": 3,
                   "name": "qwen3.8-flash-next-ud-iq4_xs"},
-    # 6-bit (manual upstream, not in its setup's menu): 169.2 GB in six shards, 101.75 GiB of experts
-    # (47 layers Q6_K gate/up + Q8_0 down, layer 2 Q8_0 gate/up) and a 54.4 GB Q8_0 PLE table in its
-    # own shard 3.  Measured 78.3 tokens/s with every expert in RAM (docs/UNSLOTH_Q6.md); on a smaller
-    # machine the Q4 numbers are the starting point, and the experts are Q6_K: 45% more bytes per
-    # element read than Q4_K, and 170-byte PLE rows against IQ4_NL's 90, so the SSD reads are slower
-    "UD-Q6_K_XL": {"arena_gb": 109.2, "ram_gb": 48, "families": ("unsloth",), "budget": True, "shards": 6,
+    # 5-bit (Unsloth Dynamic): 158.3 GB in six shards, 91.6 GiB of experts (Q5_K gate/up, Q6_K in
+    # layer 2, Q8_0 downs), close to Q8_0 in quality (94.55% of its top tokens, docs/QUANTS.md).  Its
+    # shards 2 (the output head) and 3 (the PLE table) are byte-identical to UD-Q6_K_XL's and Q8_0's
+    "UD-Q5_K_XL": {"arena_gb": 98.4, "ram_gb": 108, "families": ("unsloth",), "budget": True, "shards": 6,
+                   "name": "qwen3.8-flash-next-ud-q5_k_xl"},
+    # 6-bit (Unsloth Dynamic): 169.2 GB in six shards, 101.75 GiB of experts (47 layers Q6_K gate/up +
+    # Q8_0 down, layer 2 Q8_0 gate/up) and a 54.4 GB Q8_0 PLE table in its own shard 3.  Measured 78.3
+    # tokens/s with every expert in RAM (docs/UNSLOTH_Q6.md); on a smaller machine the Q4 numbers are
+    # the starting point, and the experts are Q6_K: 45% more bytes per element read than Q4_K, and
+    # 170-byte PLE rows against IQ4_NL's 90, so the SSD reads are slower
+    "UD-Q6_K_XL": {"arena_gb": 109.2, "ram_gb": 118, "families": ("unsloth",), "budget": True, "shards": 6,
                    "name": "qwen3.8-flash-next-ud-q6_k_xl"},
+    # 8-bit, the reference quality: 188.2 GB in six shards and 119.5 GiB of experts, every one of them
+    # Q8_0.  For a 192 GB PC with every expert in RAM (53-57 tokens/s on the R9700, docs/QUANTS.md);
+    # below that the budget keeps the hottest ones and reads the rest from the SSD
+    "Q8_0": {"arena_gb": 128.3, "ram_gb": 136, "families": ("unsloth",), "budget": True, "shards": 6,
+             "name": "qwen3.8-flash-next-q8_0"},
 }
 
 # The Unsloth shards' published sizes and SHA-256 at the pinned revision (the Hub's LFS pointers, as
-# upstream setup.py's UNSLOTH_SHARDS and docs/UNSLOTH_Q4.md, docs/UNSLOTH_Q6.md).  Shard 1 is 10,946,624
-# bytes in all three quantizations, so a size check alone cannot tell them apart.
+# upstream setup.py's UNSLOTH_SHARDS, UNSLOTH_IQ4_XS_SHARDS and UNSLOTH_BIG_SHARDS, and docs/QUANTS.md).
+# Shard 1 is metadata only: 10,946,624 bytes in every file but UD-Q5_K_XL (10,946,618), and shards 2
+# (the head) and 3 (the PLE table) are byte-identical across UD-Q5_K_XL, UD-Q6_K_XL and Q8_0 - so a
+# size check alone cannot tell the quantizations apart.
 SHA256 = {
     "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf": (10946624, "4448186216b3af4cc558bbce2c3213f01608f8f8b2e5267a9767971dd3ec8082"),
     "Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf": (49859583136, "3f342f1c1580473f1ee94ddd5b28206e8c07a70fa1a366f59d1d6c922919a6c9"),
@@ -134,12 +146,24 @@ SHA256 = {
     "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf": (10946624, "5ce89370720f8bf90890f439361282104c1aa1482d4013bb9a50923e758e71a4"),
     "Qwen3.8-Flash-Next-UD-IQ4_XS-00002-of-00003.gguf": (49835229856, "577a38a2392b40ca2193cea502e1d92f60b8cd370675d308e0ec21885d9daaa7"),
     "Qwen3.8-Flash-Next-UD-IQ4_XS-00003-of-00003.gguf": (43836407744, "d4634e6d84f0ebb0940be15c90d3790bf6464e3dea3a1cddc567dc0e83ad8833"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00001-of-00006.gguf": (10946618, "610922cdb1afe1094e95d7a3e86b12ee33317ebbf7320ac9344e21b6ae4bb69f"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00002-of-00006.gguf": (682434912, "494ca4ed3dbf97bc28da88af3890b8877b9032f909812d00c0526a9ca5e91d2e"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00003-of-00006.gguf": (54400261312, "34efd79a80a1ce540a517a5d56171924b66ce1c38b04c904f17ad6d8ef17cf20"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00004-of-00006.gguf": (49990245824, "9ee6bbe462e6830864382d629101490625b1c95afa15492b7ad550c7bed2dd13"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00005-of-00006.gguf": (49882416192, "0b2437f661f584030cb5aeb8fb1bb70f6422518a6746bfcc0304167c7b6b8beb"),
+    "Qwen3.8-Flash-Next-UD-Q5_K_XL-00006-of-00006.gguf": (3320101792, "55dd96c5ad0863b06b6393151b9ad0ac727b8d58a62e02a296ca5d5ddbfee4a3"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00001-of-00006.gguf": (10946624, "8bdc6bad55b6699f46f60708829932ff4018d7ac9bd309c388534fa31753bdb7"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00002-of-00006.gguf": (682434912, "494ca4ed3dbf97bc28da88af3890b8877b9032f909812d00c0526a9ca5e91d2e"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00003-of-00006.gguf": (54400261312, "34efd79a80a1ce540a517a5d56171924b66ce1c38b04c904f17ad6d8ef17cf20"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00004-of-00006.gguf": (49814108512, "0ea4b599880a5a52fcd9c188ba1443f646c69c96571904ddbd6a79246a01a997"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00005-of-00006.gguf": (49419317344, "9948e81ae8368144b135a7403d8c0f2cf9a6c2f9f692313865855b2832e696c9"),
     "Qwen3.8-Flash-Next-UD-Q6_K_XL-00006-of-00006.gguf": (14838313984, "e4ae255234f42b18012f6d6eec5bf615b57479b7e0a0233c47436a321ffeec3f"),
+    "Qwen3.8-Flash-Next-Q8_0-00001-of-00006.gguf": (10946624, "2dabcbb53ca537a7947bc7d20414fd464eeaf4d66d43021b5b2556cc87544ad2"),
+    "Qwen3.8-Flash-Next-Q8_0-00002-of-00006.gguf": (682434912, "494ca4ed3dbf97bc28da88af3890b8877b9032f909812d00c0526a9ca5e91d2e"),
+    "Qwen3.8-Flash-Next-Q8_0-00003-of-00006.gguf": (54400261312, "34efd79a80a1ce540a517a5d56171924b66ce1c38b04c904f17ad6d8ef17cf20"),
+    "Qwen3.8-Flash-Next-Q8_0-00004-of-00006.gguf": (49446841216, "bfa634025fabbd2658bf7694bc80b90e571699c768723f844c934c7ef06c691a"),
+    "Qwen3.8-Flash-Next-Q8_0-00005-of-00006.gguf": (49668930400, "232a8f14cc0fa4262e7efe8593774b136fe40909e39c7a020342ddaa27259a97"),
+    "Qwen3.8-Flash-Next-Q8_0-00006-of-00006.gguf": (34015618784, "538a93bca918064983409a41187ad4c68640f9aced6f29564da8f551bf86d7a5"),
     # The image encoders (setup.py's MMPROJ / FAMILIES[...]["mmproj"]) at the pinned revisions of the
     # repositories that publish them: qwen, coder and unsloth share one file (byte for byte, as the Hub
     # hashes show) and Swift has its own.  The coder's and unsloth's rows live in the same table under

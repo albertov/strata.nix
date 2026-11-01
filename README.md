@@ -18,7 +18,7 @@ as a native NixOS service, with an OpenAI- and Anthropic-compatible API on local
 - NixOS on **x86_64-linux** with an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more)
   and the official driver (580+). About 64 GB of RAM for IQ2_XS and below.
 - ~70 GB of free disk space for the model files (downloaded at first service start);
-  94-177 GB for the [Unsloth sizes](#the-unsloth-files) — an NVMe SSD there matters.
+  94-188 GB for the [Unsloth sizes](#the-unsloth-files) — an NVMe SSD there matters.
 
 The engine is compiled for `sm_120` (RTX 50) by default, so `nix build .#strata-engine` works on an
 RTX 5070/5090 out of the box; for another card override the architecture
@@ -64,8 +64,8 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | --- | --- | --- |
 | `enable` | `false` | Enable the service. |
 | `package` | `strataPkgs.strata` | The strata-serve bundle (carries the engine). |
-| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original), `coder` (half the experts, code-focused, ~32 GB RAM) or `unsloth` (Unsloth's ~4-bit and 6-bit files). |
-| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only) / `UD-IQ4_XS` / `UD-Q4_K_XL` / `UD-Q6_K_XL` (unsloth only). |
+| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original), `coder` (half the experts, code-focused, ~32 GB RAM) or `unsloth` (Unsloth's 4- to 8-bit files). |
+| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only) / `UD-IQ4_XS` / `UD-Q4_K_XL` / `UD-Q5_K_XL` / `UD-Q6_K_XL` / `Q8_0` (unsloth only). |
 | `context` | `32768` | 8192–262144 tokens. |
 | `host` / `port` | `127.0.0.1` / `8080` | Listen address. |
 | `apiKeyFile` | `null` | Path to a file with the API key (systemd credential). Required when `host` is not loopback. |
@@ -97,8 +97,8 @@ chat and through the API. It costs three things, none of them per turn:
   hash.
 
 Upstream publishes image runs for the original model, Swift and the Coder, for `UD-IQ4_XS` (a regular
-choice) and for `UD-Q4_K_XL` (reported working, not tested by them); for `UD-Q6_K_XL` nothing is
-published either way, so treat that combination as untested.
+choice), and end-to-end tests for `UD-Q4_K_XL` and `UD-Q5_K_XL`; for `UD-Q6_K_XL` and `Q8_0` nothing is
+published either way, so treat those combinations as untested.
 
 **How big a picture.** One image token is 32×32 px in this encoder (`clip.vision.patch_size` 16,
 `spatial_merge_size` 2×2), so `imageTokens` is a picture's pixel budget: the default 1024 tokens is
@@ -120,8 +120,10 @@ expert slots of VRAM for every other model on the same build, which is why upstr
 | Model | Download | Experts | Notes |
 | --- | ---: | ---: | --- |
 | `UD-IQ4_XS` | 93.7 GB (3 shards) | 59.5 GB | the regular ~4-bit choice: all of them in RAM from ~80 GB of RAM |
-| `UD-Q4_K_XL` | 111.3 GB (4 shards) | 77.0 GB | experimental upstream; 7-8.5 tokens/s on a 64 GB PC with a 12 GB card |
-| `UD-Q6_K_XL` | 169.2 GB (6 shards) | 109.2 GB | manual upstream (not in its setup's menu); 78 tokens/s measured with every expert in RAM; its PLE table is a Q8_0 54.4 GB shard the engine mmaps |
+| `UD-Q4_K_XL` | 111.3 GB (4 shards) | 77.0 GB | 4-bit; 7-8.5 tokens/s on a 64 GB PC with a 12 GB card |
+| `UD-Q5_K_XL` | 158.3 GB (6 shards) | 98.4 GB | 5-bit: Q5_K experts with Q8_0 downs, close to 8-bit (94.6% of Q8_0's top tokens); 57-60 tokens/s with every expert in RAM |
+| `UD-Q6_K_XL` | 169.2 GB (6 shards) | 109.2 GB | 6-bit: Q6_K experts with Q8_0 downs; 78 tokens/s measured with every expert in RAM; its PLE table is a Q8_0 54.4 GB shard the engine mmaps |
+| `Q8_0` | 188.2 GB (6 shards) | 128.3 GB | 8-bit, the reference quality (every expert Q8_0); all 119 GiB of experts in RAM from ~144 GB of RAM here (upstream suggests a 192 GB PC); 53-57 tokens/s measured with every expert in RAM |
 
 ```nix
 services.strata = {
@@ -135,10 +137,11 @@ services.strata = {
 
 What the prefetch does for them: it fetches every shard at the pinned Hugging Face revision
 (`resolve/38bb39ee…/<quant>/`), checks each file's size **and published SHA-256** once (shard 1 is
-10,946,624 bytes in all three quantizations, so a size alone cannot tell them apart), packs with
+metadata-only and the same size in every file but `UD-Q5_K_XL`, and shards 2-3 are byte-identical
+across `UD-Q5_K_XL`, `UD-Q6_K_XL` and `Q8_0`, so a size alone cannot tell them apart), packs with
 `--compat-bf16`, and gives the engine `--resident-budget-gib` — the RAM less 24 GB, capped at all of
-the experts (64 GB → 40 GiB, the measured setting in `docs/UNSLOTH_Q4.md`; from ~128 GB of RAM the
-cap is every expert, the state upstream's manual config reaches by leaving the flag out). Under the
+the experts (64 GB → 40 GiB, the measured setting in `docs/UNSLOTH_Q4.md`; from ~144 GB of RAM the
+cap is every one of `Q8_0`'s 119 GiB, the state upstream reaches by leaving the flag out). Under the
 cap, the experts that do not fit are read from the SSD for every token: use an NVMe.
 
 Example with the original model, the best quant and a LAN-reachable API:
