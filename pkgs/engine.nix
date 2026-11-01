@@ -66,14 +66,20 @@ cudaPackages.backendStdenv.mkDerivation {
 
   installPhase = ''
     runHook preInstall
-    bin=$(find "$NIX_BUILD_TOP" -maxdepth 4 -type f -name strata | head -1)
-    dev=$(find "$NIX_BUILD_TOP" -maxdepth 4 -type f -name strata-device | head -1)
-    if [[ -z "$bin" ]]; then
-      echo "strata binary not found under $NIX_BUILD_TOP" >&2
+    # The source tree ships bin/strata, the Python Terminal launcher.  Never pick that up: the
+    # compiled engine is the CMake target's output in the build directory (the cwd here).
+    bin="$PWD/strata"
+    dev="$PWD/strata-device"
+    if [[ ! -x "$bin" ]]; then
+      echo "strata binary not found at $bin" >&2
+      exit 1
+    fi
+    if ! head -c 4 "$bin" | grep -q ELF; then
+      echo "$bin is not an ELF binary (the source launcher was picked up?)" >&2
       exit 1
     fi
     install -Dm755 "$bin" $out/bin/strata
-    [[ -n "$dev" ]] && install -Dm755 "$dev" $out/bin/strata-device
+    [[ -x "$dev" ]] && install -Dm755 "$dev" $out/bin/strata-device
     cat > $out/bin/BUILD.json <<EOF
 {
   "version": "${version}",
