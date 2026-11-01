@@ -53,6 +53,42 @@ UNSLOTH = {
     ),
 }
 
+# The NVFP4 family: ready-made packs, not GGUF shards.  model -> (repo, revision, {path: (role, bytes, sha256)}).
+# From the fork's setup.py NVFP4_REPOS, checked against the Hub's LFS pointers at those revisions.
+REV_NVFP4 = "640a1db97446ddd5e89d2b70ecd0297987192c93"
+REV_NVFP4_NVIDIA = "cca8f7fee5ce0af932097340a75e06df25c4e57d"
+_NVFP4_TOKENIZER = {
+    "pack/tokenizer/chat_template.jinja": ("pack", 8952, "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"),
+    "pack/tokenizer/merges.txt": ("pack", 3600844, "080cf95432173729d160346b7882bd2a644b07f7a3813a3eb73f4e66787bfde9"),
+    "pack/tokenizer/token_type.json": ("pack", 744960, "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"),
+    "pack/tokenizer/tokenizer.json": ("pack", 554, "87be2ac47d8bc7393b7435df6ccd276740019a393941a2585d5edce59f450c54"),
+    "pack/tokenizer/vocab.json": ("pack", 5737005, "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"),
+}
+_NVFP4_SHARED = {
+    "ple-fp8.gguf": ("ple", 51_200_246_176, "37f89b8ce5a3425932763257c40229ec02723ad2ab14b4bbfc26a486f4725c9c"),
+    "token-embd-bf16.gguf": ("embd", 1_271_398_656, "386203af9070c7b43acb24ded8922876721d97bbad1a709b25cb49d694a7f51d"),
+}
+READY = {
+    "NVFP4": ("Maximilian228/Qwen3.8-Flash-Next-NVFP4-GPTQ-Strata", REV_NVFP4, {
+        "pack/dense.bin": ("pack", 1_538_035_200, "974df6dcefcae85e3fd2c19fcc12eeaacaadde8261ab732d5af5af6ce2e25a7a"),
+        "pack/experts.bin": ("pack", 67_948_118_016, "325e5e0d85c262a8d8278daf73b20696ec877d9a3ff584e57391fa69ad10bc64"),
+        "pack/index.txt": ("pack", 93663, "f62dc71e1c74a72794db54d3917bc71131cc6eae6f3dcdc3fdada48ff70f93ab"),
+        "pack/native_experts.txt": ("pack", 1599, "615f655fb28bf60b243664860b135710bf4177b111c6be89073e780a35de1018"),
+        **_NVFP4_TOKENIZER,
+        "qwen-nvfp4-gptq-dense.gguf": ("dense", 5_991_569_472, "abdf74336b53d8f7ca3d99947f1eac8f19b8a544966750127cb61e561b127e3b"),
+        **_NVFP4_SHARED,
+    }),
+    "NVFP4-NVIDIA": ("Maximilian228/Qwen3.8-Flash-Next-NVIDIA-NVFP4-Strata", REV_NVFP4_NVIDIA, {
+        "pack/dense.bin": ("pack", 1_538_625_024, "1f1c2422069de292673ae6cee7d69f7090732dec69f3f125612a0de456279714"),
+        "pack/experts.bin": ("pack", 67_948_118_016, "bb42080bb7585505b64d091d5a734c05376bbd6171406fa9688a46fbc261b957"),
+        "pack/index.txt": ("pack", 117490, "17793d1c5b187a73d3c1dc1677af4d4c9b23845394dd7e88bfa53396b41b77e3"),
+        "pack/native_experts.txt": ("pack", 1590, "d7f8b4372bb122f3d711030e5d522bff1c8746ac7d133a59a2cc7277283e59b6"),
+        **_NVFP4_TOKENIZER,
+        "qwen-nvidia-nvfp4-dense.gguf": ("dense", 5_992_176_896, "0f795ca0cbb908e0cf2b894b30103e21455b5a05346a7ef79da208540cfd2be3"),
+        **_NVFP4_SHARED,
+    }),
+}
+
 # one shard per ordinary family (the two-shard layout): the {q}/ subfolder (qwen, coder) and Swift's flat layout
 ORDINARY = {
     ("qwen", "IQ2_XS"): (
@@ -113,6 +149,64 @@ for quant, (folder, total, names) in UNSLOTH.items():
     check("--compat-bf16" in prefetch.pack_args(prefetch.FAMILIES["unsloth"]),
           f"{quant}: Unsloth packs need --compat-bf16 (iq_pack refuses Q8_0 projections without it)")
 
+# ---- the NVFP4 family: ready-made packs (no GGUF shards, nothing packed locally) ---------------
+for model, (repo, revision, files) in READY.items():
+    check(model in prefetch.QUANTS, f"{model}: not in QUANTS")
+    if model not in prefetch.QUANTS:
+        continue
+    q = prefetch.QUANTS[model]
+    check(q.get("families") == ("nvfp4",), f"{model}: families should be ('nvfp4',), got {q.get('families')}")
+    check(q.get("ready") is True, f"{model}: it is a ready-made pack, mark it ready")
+    check(q.get("budget") is True, f"{model}: its 68 GB of experts need the RAM budget, mark it budget")
+    check(q.get("arena_gb") == 68.0, f"{model}: arena_gb = {q.get('arena_gb')}, upstream says 68.0")
+    check(q.get("ram_gb") == 80, f"{model}: ram_gb = {q.get('ram_gb')}, upstream says 80")
+
+    ready_table = getattr(prefetch, "READY", {}).get(model)
+    check(ready_table is not None, f"{model}: no READY entry")
+    if ready_table is not None:
+        check(ready_table.get("repo") == repo, f"{model}: repo {ready_table.get('repo')!r}, want {repo!r}")
+        check(ready_table.get("revision") == revision,
+              f"{model}: revision {ready_table.get('revision')!r}, want {revision!r}")
+
+    ready_files = getattr(prefetch, "ready_files", None)
+    if ready_files is None:
+        check(False, f"{model}: prefetch.ready_files is missing")
+        continue
+    got = {f[3]: (f[0], f[4], f[5]) for f in ready_files(model)}
+    check(got == files, f"{model}: files differ\n     got  {got}\n     want {files}")
+    for f in ready_files(model):
+        check(f[1] == repo and f[2] == revision, f"{model}/{f[3]}: repo/revision {f[1]}@{f[2]}")
+        check(prefetch.ready_url(f) == f"https://huggingface.co/{repo}/resolve/{revision}/{f[3]}",
+              f"{model}/{f[3]}: bad URL {prefetch.ready_url(f)}")
+
+    ready_paths = getattr(prefetch, "ready_paths", None)
+    if ready_paths is None:
+        check(False, f"{model}: prefetch.ready_paths is missing")
+        continue
+    paths = ready_paths(model, Path("/models"))
+    root = Path("/models") / repo.replace("/", "--")
+    dense = next(p for p, (role, _, _) in files.items() if role == "dense")
+    check(paths.get("pack") == root / "pack", f"{model}: pack is {paths.get('pack')}, want {root / 'pack'}")
+    check(paths.get("dense") == root / dense, f"{model}: dense is {paths.get('dense')}, want {root / dense}")
+    check(paths.get("ple") == root / "ple-fp8.gguf", f"{model}: ple is {paths.get('ple')}")
+    check(paths.get("embd") == root / "token-embd-bf16.gguf", f"{model}: embd is {paths.get('embd')}")
+
+    ready_model_args = getattr(prefetch, "ready_model_args", None)
+    if ready_model_args is None:
+        check(False, f"{model}: prefetch.ready_model_args is missing")
+    else:
+        check(ready_model_args(paths) == [
+            "--pack", str(root / "pack"),
+            "--native", str(root / dense), "--native-dense-gguf", str(root / dense),
+            "--ple-gguf", str(root / "ple-fp8.gguf"),
+            "--embd-gguf", str(root / "token-embd-bf16.gguf"),
+        ], f"{model}: bad engine arguments {ready_model_args(paths)}")
+
+# the PLE table and the token embedding are the same files in both repositories: a second install links them
+for name in ("ple-fp8.gguf", "token-embd-bf16.gguf"):
+    shas = {files[name][2] for (_, _, files) in READY.values()}
+    check(len(shas) == 1, f"{name}: the NVFP4 repositories should publish the same file, got {shas}")
+
 # ---- the ordinary families: pinned revisions, {q}/ subfolder, two shards -----------------------
 for (family, quant), (folder, count, name) in ORDINARY.items():
     got_names = names_of(family, quant)
@@ -126,7 +220,8 @@ for quant, q in prefetch.QUANTS.items():
     fams = q.get("families") or tuple(prefetch.FAMILIES)
     check(bool(fams) and all(f in prefetch.FAMILIES for f in fams), f"{quant}: families {fams} unknown")
 for family, fam in prefetch.FAMILIES.items():
-    check(fam.get("repo") in prefetch.HF_REVISIONS, f"{family}: {fam.get('repo')!r} has no pinned revision")
+    if fam.get("repo") is not None:      # ready-made families pin one revision per model in READY
+        check(fam.get("repo") in prefetch.HF_REVISIONS, f"{family}: {fam.get('repo')!r} has no pinned revision")
 
 # ---- the RAM budget for the Unsloth files (docs/UNSLOTH_Q4.md: 64 GB -> 40 GiB) ----------------
 check(prefetch.resident_budget_gib(prefetch.QUANTS["UD-Q4_K_XL"], 64) == 40,
@@ -151,6 +246,25 @@ check(budget("Q8_0", 128) == 104,
       "Q8_0 on 128 GB: 104 of its 119 GiB of experts in RAM, the rest read from the SSD")
 check(budget("Q8_0", 192) == 119,
       "Q8_0 on 192 GB: the budget is capped at all 119 GiB of its experts (every one in RAM)")
+check(budget("NVFP4", 80) == 56,
+      "NVFP4 on 80 GB: 56 of its 63 GiB of experts in RAM while the budget mode applies")
+check(budget("NVFP4", 96) == 63,
+      "NVFP4 on 96 GB: the budget is capped at all 63 GiB of its experts")
+
+
+def budget_needed(quant: str, ram: float):
+    """Upstream's rule: all experts in RAM when they and 16 GB more fit; else a RAM budget."""
+    fn = getattr(prefetch, "budget_needed", None)
+    q = prefetch.QUANTS.get(quant)
+    return None if fn is None or q is None else fn(q, ram)
+
+
+check(budget_needed("UD-Q4_K_XL", 64) is True, "UD-Q4_K_XL on 64 GB: its 71 GiB of experts do not fit with 16 GB spare")
+check(budget_needed("UD-Q4_K_XL", 96) is False, "UD-Q4_K_XL on 96 GB: every expert fits with 16 GB spare")
+check(budget_needed("Q8_0", 128) is True, "Q8_0 on 128 GB: its 119 GiB of experts need the budget")
+check(budget_needed("Q8_0", 136) is False, "Q8_0 on 136 GB: every expert fits with 16 GB spare, as upstream says")
+check(budget_needed("NVFP4", 64) is True, "NVFP4 on 64 GB: its 63 GiB of experts need the budget")
+check(budget_needed("NVFP4", 80) is False, "NVFP4 on 80 GB: every expert fits with 16 GB spare, as upstream says")
 
 # ---- images: the family's encoder (mmproj), its pinned URL, size and SHA-256 --------------------
 # From setup.py (FAMILIES[...]["mmproj_hf"] and ["mmproj"]) and from the Hub's own answers at those
@@ -165,13 +279,19 @@ ENCODERS = {
     # Unsloth only requantizes the original model, so it reads images with the original's encoder
     "unsloth": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
                 907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
+    # the NVFP4 packs keep the vision tower unquantized and read pictures with the original's encoder
+    "nvfp4": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+              907543008, "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0"),
 }
 
 for family, (repo, name, size, sha) in ENCODERS.items():
     rev = {"ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF": REV_QWEN,
            "ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF": REV_SWIFT,
            "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF": REV_CODER}[repo]
-    fam = prefetch.FAMILIES[family]
+    fam = prefetch.FAMILIES.get(family)
+    check(fam is not None, f"{family}: not in FAMILIES")
+    if fam is None:
+        continue
     check(tuple(fam.get("encoder", ())) == (repo, name),
           f"{family}: encoder is {fam.get('encoder')!r}, want {(repo, name)}")
     check(prefetch.encoder_url(fam) == f"https://huggingface.co/{repo}/resolve/{rev}/{name}",
@@ -222,6 +342,10 @@ check(asked is not None and getattr(asked, "vision_tokens", None) == 2048,
 plain = parses(BASE)
 check(plain is not None and getattr(plain, "vision_tokens", "MISSING") is None,
       "no --vision-tokens: prefetch's own default, so an unchanged service keeps upstream's 1024")
+nv = parses(["--family", "nvfp4", "--model", "NVFP4", "--data-dir", "/tmp/x"])
+check(nv is not None and nv.family == "nvfp4", "--family nvfp4 --model NVFP4 must parse")
+nv2 = parses(["--family", "nvfp4", "--model", "NVFP4-NVIDIA", "--data-dir", "/tmp/x"])
+check(nv2 is not None and nv2.model == "NVFP4-NVIDIA", "--family nvfp4 --model NVFP4-NVIDIA must parse")
 
 
 # ---- extraEngineArgs: the flag form the module writes is the form the parser reads ---------------
@@ -236,6 +360,8 @@ model_enum = re.search(r"model = lib\.mkOption \{\s*type = lib\.types\.enum \[(.
 check(model_enum is not None, "nix/module.nix: model = lib.mkOption with a types.enum list not found")
 unsloth_models = re.search(r"unslothModels = \[(.*?)\];", mod, re.S)
 check(unsloth_models is not None, "nix/module.nix: unslothModels list not found")
+nvfp4_models = re.search(r"nvfp4Models = \[(.*?)\];", mod, re.S)
+check(nvfp4_models is not None, "nix/module.nix: nvfp4Models list not found")
 for quant in UNSLOTH:
     if model_enum is not None:
         check(re.search(rf'"{re.escape(quant)}"', model_enum.group(1)) is not None,
@@ -243,6 +369,13 @@ for quant in UNSLOTH:
     if unsloth_models is not None:
         check(re.search(rf'"{re.escape(quant)}"', unsloth_models.group(1)) is not None,
               f"{quant}: nix/module.nix's unslothModels list must include it")
+for quant in READY:
+    if model_enum is not None:
+        check(re.search(rf'"{re.escape(quant)}"', model_enum.group(1)) is not None,
+              f"{quant}: nix/module.nix's model enum must offer it")
+    if nvfp4_models is not None:
+        check(re.search(rf'"{re.escape(quant)}"', nvfp4_models.group(1)) is not None,
+              f"{quant}: nix/module.nix's nvfp4Models list must include it")
 
 check(re.search(r'--extra-arg=\$\{', mod) is not None,
       "nix/module.nix must write each extra engine argument as --extra-arg=${...}, not --extra-arg ${...}")
