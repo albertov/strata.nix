@@ -16,9 +16,11 @@ as a native NixOS service, with an OpenAI- and Anthropic-compatible API on local
 ## Requirements
 
 - NixOS on **x86_64-linux** with an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more)
-  and the official driver (580+). About 64 GB of RAM for IQ2_XS and below.
+  and the official driver (580+). About 64 GB of RAM for IQ2_XS and below; the Unsloth
+  and NVFP4 sizes need more (up to ~136 GB and ~80 GB).
 - ~70 GB of free disk space for the model files (downloaded at first service start);
-  94-188 GB for the [Unsloth sizes](#the-unsloth-files) — an NVMe SSD there matters.
+  94-188 GB for the [Unsloth sizes](#the-unsloth-files) and 128 GB for the
+  [NVFP4 packs](#nvfp4-packs) — an NVMe SSD there matters.
 
 The engine is compiled for `sm_120` (RTX 50) by default, so `nix build .#strata-engine` works on an
 RTX 5070/5090 out of the box; for another card override the architecture
@@ -64,16 +66,16 @@ that is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | --- | --- | --- |
 | `enable` | `false` | Enable the service. |
 | `package` | `strataPkgs.strata` | The strata-serve bundle (carries the engine). |
-| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original), `coder` (half the experts, code-focused, ~32 GB RAM) or `unsloth` (Unsloth's 4- to 8-bit files). |
-| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only) / `UD-IQ4_XS` / `UD-Q4_K_XL` / `UD-Q5_K_XL` / `UD-Q6_K_XL` / `Q8_0` (unsloth only). |
+| `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `qwen` (original), `coder` (half the experts, code-focused, ~32 GB RAM), `unsloth` (Unsloth's 4- to 8-bit files) or `nvfp4` (NVIDIA's 4-bit FP4 experts: NVIDIA only). |
+| `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only) / `UD-IQ4_XS` / `UD-Q4_K_XL` / `UD-Q5_K_XL` / `UD-Q6_K_XL` / `Q8_0` (unsloth only) / `NVFP4` / `NVFP4-NVIDIA` (nvfp4 only). |
 | `context` | `32768` | 8192–262144 tokens. |
 | `host` / `port` | `127.0.0.1` / `8080` | Listen address. |
 | `apiKeyFile` | `null` | Path to a file with the API key (systemd credential). Required when `host` is not loopback. |
 | `hfTokenFile` | `null` | Hugging Face token file, only for gated repos. |
 | `openFirewall` | `false` | Open the TCP port in the firewall. |
 | `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
-| `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). Not for the Unsloth files. |
-| `residentBudgetGiB` | `null` | Unsloth files: GiB of their experts the engine keeps in RAM; the rest are read from the SSD. Auto: RAM − 24 GB, capped at all of them. |
+| `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). Not for the Unsloth or NVFP4 files. |
+| `residentBudgetGiB` | `null` | Unsloth/NVFP4 files: GiB of their experts the engine keeps in RAM; the rest are read from the SSD. Auto: all of them when they fit with 16 GB spare, else RAM − 24 GB. |
 | `images` | `false` | Read pictures (OpenAI `image_url`, Anthropic image blocks): fetches the model's mmproj (0.9 GB) and runs `strata-vision` beside the engine. |
 | `imageTokens` | `null` | Pictures: the most image tokens one picture becomes (`strata-vision --max-tokens`). Auto: 1024. One token is 32×32 px, so it is a pixel budget the encoder warms up at. |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, …). |
@@ -98,7 +100,8 @@ chat and through the API. It costs three things, none of them per turn:
 
 Upstream publishes image runs for the original model, Swift and the Coder, for `UD-IQ4_XS` (a regular
 choice), and end-to-end tests for `UD-Q4_K_XL` and `UD-Q5_K_XL`; for `UD-Q6_K_XL` and `Q8_0` nothing is
-published either way, so treat those combinations as untested.
+published either way, so treat those combinations as untested.  The NVFP4 packs keep the vision tower
+unquantized and read pictures with the original model's encoder.
 
 **How big a picture.** One image token is 32×32 px in this encoder (`clip.vision.patch_size` 16,
 `spatial_merge_size` 2×2), so `imageTokens` is a picture's pixel budget: the default 1024 tokens is
@@ -119,11 +122,11 @@ expert slots of VRAM for every other model on the same build, which is why upstr
 
 | Model | Download | Experts | Notes |
 | --- | ---: | ---: | --- |
-| `UD-IQ4_XS` | 93.7 GB (3 shards) | 59.5 GB | the regular ~4-bit choice: all of them in RAM from ~80 GB of RAM |
+| `UD-IQ4_XS` | 93.7 GB (3 shards) | 59.5 GB | the regular ~4-bit choice: all of them in RAM from ~72 GB of RAM |
 | `UD-Q4_K_XL` | 111.3 GB (4 shards) | 77.0 GB | 4-bit; 7-8.5 tokens/s on a 64 GB PC with a 12 GB card |
 | `UD-Q5_K_XL` | 158.3 GB (6 shards) | 98.4 GB | 5-bit: Q5_K experts with Q8_0 downs, close to 8-bit (94.6% of Q8_0's top tokens); 57-60 tokens/s with every expert in RAM |
 | `UD-Q6_K_XL` | 169.2 GB (6 shards) | 109.2 GB | 6-bit: Q6_K experts with Q8_0 downs; 78 tokens/s measured with every expert in RAM; its PLE table is a Q8_0 54.4 GB shard the engine mmaps |
-| `Q8_0` | 188.2 GB (6 shards) | 128.3 GB | 8-bit, the reference quality (every expert Q8_0); all 119 GiB of experts in RAM from ~144 GB of RAM here (upstream suggests a 192 GB PC); 53-57 tokens/s measured with every expert in RAM |
+| `Q8_0` | 188.2 GB (6 shards) | 128.3 GB | 8-bit, the reference quality (every expert Q8_0); all 119 GiB of experts in RAM from ~136 GB of RAM here; 53-57 tokens/s measured with every expert in RAM |
 
 ```nix
 services.strata = {
@@ -138,14 +141,47 @@ services.strata = {
 What the prefetch does for them: it fetches every shard at the pinned Hugging Face revision
 (`resolve/38bb39ee…/<quant>/`), checks each file's size **and published SHA-256** once (shard 1 is
 metadata-only and the same size in every file but `UD-Q5_K_XL`, and shards 2-3 are byte-identical
-across `UD-Q5_K_XL`, `UD-Q6_K_XL` and `Q8_0`, so a size alone cannot tell them apart), packs with
-`--compat-bf16`, and gives the engine `--resident-budget-gib` — the RAM less 24 GB, capped at all of
-the experts (64 GB → 40 GiB, the measured setting in `docs/UNSLOTH_Q4.md`; from ~144 GB of RAM the
-cap is every one of `Q8_0`'s 119 GiB, the state upstream reaches by leaving the flag out). Under the
-cap, the experts that do not fit are read from the SSD for every token: use an NVMe.
+across `UD-Q5_K_XL`, `UD-Q6_K_XL` and `Q8_0`, so a size alone cannot tell them apart), and packs with
+`--compat-bf16`.  When the experts do not all fit with 16 GB to spare, it gives the engine
+`--resident-budget-gib` — the RAM less 24 GB (64 GB → 40 GiB, the measured setting in
+`docs/UNSLOTH_Q4.md`); from ~136 GB every one of `Q8_0`'s 119 GiB fits, so no flag is written and the
+engine keeps them all.  Under the cap, the experts that do not fit are read from the SSD for every
+token: use an NVMe.
+
+## NVFP4 packs
+
+`family = "nvfp4"` serves the original model with NVIDIA's 4-bit FP4 routed experts, as ready-made
+Strata packs: nothing is converted or packed locally.  They need an NVIDIA card (RTX 50 cards use
+their FP4 tensor cores; older cards multiply at 8-bit precision), and they read pictures with the
+original model's encoder.
+
+| Model | What it is | Download | Experts |
+| --- | --- | ---: | ---: |
+| `NVFP4` | the GPTQ pack (Strata's own conversion of Qwen's BF16 experts): the best quality of the family | 128 GB | 68 GB |
+| `NVFP4-NVIDIA` | NVIDIA's own checkpoint, converted with plain rounding; the same size and speed | 128 GB | 68 GB |
+
+Every expert stays in RAM from ~80 GB of RAM; below that the RAM budget keeps the hottest ones and
+reads the rest from the pack's `experts.bin` on the SSD.  The prefetch downloads the pack folder
+whole (`index.txt`, `experts.bin`, `dense.bin`, the tokenizer), the dense GGUF, the FP8 n-gram table
+and the BF16 token embedding at the repositories' pinned revisions, checks every file's size and
+**published SHA-256**, and hard-links the n-gram table and token embedding when the other pack is
+already present.  The MTP draft layer comes from the original Qwen checkpoint, as for every family.
+
+```nix
+services.strata = {
+  enable = true;
+  family = "nvfp4";
+  model = "NVFP4";
+  context = 32768;
+};
+```
+
+Upstream also has `NVFP4-QAD` (NVIDIA's FP4-trained checkpoint, converted on the PC); it is not
+offered here because that conversion needs `torch`/`transformers` and llama.cpp's converter, which
+this bundle does not carry.  Licenses: the GPTQ pack is under Qwen's Community License 1.0;
+`NVFP4-NVIDIA` is under the NVIDIA Open Model License plus Qwen's Community License 1.0.
 
 Example with the original model, the best quant and a LAN-reachable API:
-
 ```nix
 services.strata = {
   enable = true;
@@ -191,8 +227,8 @@ actually run — `nix flake lock --update-input strata` pulls new releases
 - `nix flake check` — a serve smoke test (mock engine: HTTP endpoints without a GPU), a NixOS VM
   test of the systemd service with the mock engine, and `prefetch-tables`, which checks the download
   tables offline against the names, sizes and SHA-256 the Hugging Face API gives at the pinned
-  revisions (a wrong subfolder or shard count would otherwise cost a 100-170 GB download first). The
-  same check covers the image encoders' names, sizes and hashes.
+  revisions (a wrong subfolder or shard count would otherwise cost a 100-188 GB download first). The
+  same check covers the image encoders and the NVFP4 packs' file lists.
 - `nix build .#strata-engine` — the real compile (20-40 minutes, once, cached after).
 - `nix build .#strata-vision` — the image encoder, for `images = true` (it builds ggml-cuda again).
 
@@ -201,4 +237,5 @@ actually run — `nix flake lock --update-input strata` pulls new releases
 - This flake: MIT.
 - Strata (engine, server, tools): MIT, upstream <https://github.com/Niko1221/Strata>.
 - The model weights are not part of this flake; each model's license applies
-  (Qwen Community 1.0; Swift Open License 1.0; see the models' Hugging Face pages).
+  (Qwen Community 1.0; Swift Open License 1.0; the NVFP4 packs' licenses are listed
+  above; see the models' Hugging Face pages).

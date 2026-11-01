@@ -116,6 +116,26 @@
         ];
       };
 
+      # Eval only, never built: the NVFP4 side of the module (its ready-pack tables, images and
+      # assertions), so it evaluates with the rest of the flake.  Evaluate its preStart to see the
+      # exact prefetch command.
+      nixosConfigurations.strata-nvfp4-eval = nixpkgs.lib.nixosSystem {
+        system = system;
+        modules = [
+          self.nixosModules.default
+          ({ ... }: {
+            boot.isContainer = true;
+            system.stateVersion = "26.11";
+            services.strata = {
+              enable = true;
+              family = "nvfp4";
+              model = "NVFP4";
+              context = 8192;
+            };
+          })
+        ];
+      };
+
       # Eval only, never built: the image side of the module (the encoder's flags, the mmproj fetch and
       # the passthru.vision assertion), so it evaluates with the rest of the flake.  Evaluate its
       # preStart to see the exact prefetch command, including --vision-exe.

@@ -3,6 +3,7 @@
 let
   cfg = config.services.strata;
   unslothModels = [ "UD-IQ4_XS" "UD-Q4_K_XL" "UD-Q5_K_XL" "UD-Q6_K_XL" "Q8_0" ];
+  nvfp4Models = [ "NVFP4" "NVFP4-NVIDIA" ];
 in
 {
   options.services.strata = {
@@ -11,20 +12,30 @@ in
     package = lib.mkPackageOption strataPkgs "strata" { };
 
     family = lib.mkOption {
-      type = lib.types.enum [ "qwen" "swift" "coder" "unsloth"];
+      type = lib.types.enum [ "qwen" "swift" "coder" "unsloth" "nvfp4" ];
       default = "swift";
       description = ''
         Which model: `swift` (Swift 1.5, answers ~1.8x sooner for the same accuracy),
-        `qwen` (the original Qwen3.8-Flash-Next), `coder` (half the experts kept, code-focused)
-        or `unsloth` (Unsloth's 4- to 8-bit files: the closest to the full weights,
-        the biggest download).
+        `qwen` (the original Qwen3.8-Flash-Next), `coder` (half the experts kept, code-focused),
+        `unsloth` (Unsloth's 4- to 8-bit files: the closest to the full weights, the biggest
+        download) or `nvfp4` (NVIDIA's 4-bit FP4 experts, as ready-made packs: NVIDIA cards only).
       '';
     };
 
     model = lib.mkOption {
       type = lib.types.enum [
-        "Q2_0" "IQ2_XS" "IQ3_XXS" "IQ3_S" "IQ1_M"
-        "UD-IQ4_XS" "UD-Q4_K_XL" "UD-Q5_K_XL" "UD-Q6_K_XL" "Q8_0"
+        "Q2_0"
+        "IQ2_XS"
+        "IQ3_XXS"
+        "IQ3_S"
+        "IQ1_M"
+        "UD-IQ4_XS"
+        "UD-Q4_K_XL"
+        "UD-Q5_K_XL"
+        "UD-Q6_K_XL"
+        "Q8_0"
+        "NVFP4"
+        "NVFP4-NVIDIA"
       ];
       default = "IQ2_XS";
       description = ''
@@ -32,11 +43,14 @@ in
         IQ3_S (best, qwen only, ~62 GB RAM), IQ1_M (coder only, ~32 GB RAM).  With
         family = unsloth: UD-IQ4_XS (93.7 GB, their regular 4-bit), UD-Q4_K_XL (111.3 GB),
         UD-Q5_K_XL (158.3 GB), UD-Q6_K_XL (169.2 GB) or Q8_0 (188.2 GB, every expert at 8
-        bits: the reference quality; its 119 GiB of experts all fit in RAM from ~144 GB,
+        bits: the reference quality; its 119 GiB of experts all fit in RAM from ~136 GB,
         else part of them are read from the SSD).  UD-Q5_K_XL and UD-Q6_K_XL come closest to
         the full model (78 tokens/s measured for UD-Q6_K_XL with its 101 GiB of experts in
         RAM).  All five keep their experts in the GGUF files - no experts.bin, so lowRam
-        does not apply - and want an NVMe SSD.
+        does not apply - and want an NVMe SSD.  With family = nvfp4: NVFP4 (the GPTQ pack,
+        the best quality of the family) or NVFP4-NVIDIA (NVIDIA's own checkpoint, the same
+        size and speed); 128 GB downloaded, 68 GB of experts, all of them in RAM from ~80 GB.
+        NVIDIA only: RTX 50 cards use their FP4 tensor cores, older cards run at 8-bit.
       '';
     };
 
@@ -90,7 +104,7 @@ in
       description = ''
         Map the experts from the pack's experts.bin instead of copying them into RAM
         (needs a big GPU to stay fast). Null: automatic from the model's RAM needs.
-        Not available for the Unsloth files - see residentBudgetGiB.
+        Not available for the Unsloth and NVFP4 files - see residentBudgetGiB.
       '';
     };
 
@@ -98,10 +112,11 @@ in
       type = lib.types.nullOr lib.types.int;
       default = null;
       description = ''
-        The Unsloth files only: how many GiB of their experts the engine keeps in RAM
-        (--resident-budget-gib); the rest are read from the SSD for every token. Null: the
-        machine's RAM less 24 GB, capped at all of them (64 GB: 40, the measured setting for
-        UD-Q4_K_XL in docs/UNSLOTH_Q4.md; from ~144 GB: every one of Q8_0's 119 GiB).
+        The Unsloth and NVFP4 files only: how many GiB of their experts the engine keeps in RAM
+        (--resident-budget-gib); the rest are read from the SSD for every token. Null: every expert
+        stays in RAM when they and 16 GB more fit this machine; otherwise the RAM less 24 GB, capped
+        at all of them (64 GB: 40, the measured setting for UD-Q4_K_XL in docs/UNSLOTH_Q4.md;
+        ~80 GB: all 63 GiB of NVFP4's experts; ~136 GB: all 119 GiB of Q8_0's).
       '';
     };
 
@@ -121,9 +136,9 @@ in
         process alive beside the engine (from the package's passthru.vision); at the default 1024
         image tokens that encoder takes about 1.2 GB of VRAM, for which the engine keeps 700 MiB
         free.  See `imageTokens` for how big a picture it is allowed to see.
-        The Unsloth files and the Coder are requantizations of the original model, so they read
-        images with the original's encoder.  Encoded pictures are cached by their hash, so a client
-        that resends an image every turn pays for it once.
+        The Unsloth files, the Coder and the NVFP4 packs are requantizations of the original model,
+        so they read images with the original's encoder.  Encoded pictures are cached by their hash,
+        so a client that resends an image every turn pays for it once.
       '';
     };
 
@@ -197,6 +212,20 @@ in
         message = ''
           services.strata: the Unsloth files have no low-RAM mode - their experts stay in the GGUF
           files and the engine reads them in place. Set residentBudgetGiB instead.'';
+      }
+      {
+        assertion = !(lib.elem cfg.model nvfp4Models) || cfg.family == "nvfp4";
+        message = "services.strata: ${cfg.model} is an NVFP4 pack: family = nvfp4.";
+      }
+      {
+        assertion = cfg.family != "nvfp4" || lib.elem cfg.model nvfp4Models;
+        message = "services.strata: family = nvfp4 takes model = NVFP4 or NVFP4-NVIDIA.";
+      }
+      {
+        assertion = cfg.family != "nvfp4" || cfg.lowRam != true;
+        message = ''
+          services.strata: the NVFP4 packs have no low-RAM mode - their experts live in the pack's
+          experts.bin and the engine reads them in place. Set residentBudgetGiB instead.'';
       }
       {
         assertion = cfg.host == "127.0.0.1" || cfg.host == "localhost" || cfg.apiKeyFile != null;

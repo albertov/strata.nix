@@ -5,8 +5,9 @@
         --emit-config /var/lib/strata/config.json --engine /run/current-system/.../bin/strata
 
 Steps (each skipped when already done):
-  1. download the model's shards from Hugging Face (resumable, size- and hash-verified)
-  2. build the pack with upstream tools (iq_pack.py: tensors + tokenizer)
+  1. download the model's files from Hugging Face (resumable, size- and hash-verified): GGUF shards,
+     or the whole ready-made pack folder of an NVFP4 model
+  2. build the pack with upstream tools (iq_pack.py: tensors + tokenizer; ready-made packs ship it)
   3. fetch and pack the MTP draft layer (~5 GB, from the original Qwen checkpoint)
   4. write prepared.json and, with --emit-config, the engine run config for serve/server.py
 
@@ -94,7 +95,18 @@ FAMILIES = {
         "tag": "unsloth-",
         "name": "qwen3.8-flash-next-ud",
         "profile": "expert-profile.bin",
-    }
+    },
+    # NVFP4's ready-made packs (docs/NVFP4.md): no GGUF shards and nothing is packed locally.  Each model
+    # has its own repository (READY below); the packs keep the vision tower unquantized, so pictures use
+    # the original model's encoder.  Their experts live in the pack's experts.bin, so --low-ram does not
+    # apply; a RAM budget covers the machines whose RAM does not hold them.
+    "nvfp4": {
+        "encoder": ("ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF", "mmproj-Qwen3.8-Flash-Next-BF16.gguf"),
+        "tag": "",
+        "name": "qwen3.8-flash-next-nvfp4",
+        "profile": "expert-profile.bin",
+        "ready": True,
+    },
 }
 
 # arena_gb: the routed experts' bytes (decimal GB, as upstream's MODELS table); ram_gb: the RAM the
@@ -131,6 +143,59 @@ QUANTS = {
     # below that the budget keeps the hottest ones and reads the rest from the SSD
     "Q8_0": {"arena_gb": 128.3, "ram_gb": 136, "families": ("unsloth",), "budget": True, "shards": 6,
              "name": "qwen3.8-flash-next-q8_0"},
+    # NVFP4's ready-made packs (docs/NVFP4.md): 128 GB downloaded, 68 GB of 4-bit NVIDIA experts and ~80 GB
+    # of RAM for all of them.  RTX 50 cards multiply them on their FP4 tensor cores; other NVIDIA cards run
+    # them at 8-bit precision.  NVFP4 is the GPTQ pack (best quality of the family); NVFP4-NVIDIA is NVIDIA's
+    # own checkpoint, converted with plain rounding (same size and speed)
+    "NVFP4": {"arena_gb": 68.0, "ram_gb": 80, "families": ("nvfp4",), "budget": True, "ready": True,
+              "name": "qwen3.8-flash-next-nvfp4"},
+    "NVFP4-NVIDIA": {"arena_gb": 68.0, "ram_gb": 80, "families": ("nvfp4",), "budget": True, "ready": True,
+                     "name": "qwen3.8-flash-next-nvfp4-nvidia"},
+}
+
+# The ready-made NVFP4 packs (upstream setup.py's NVFP4_REPOS, checked against the Hub's LFS pointers).
+# Files are downloaded into <models>/<owner>--<repo>/<their path>, so the pack folder arrives whole; the
+# PLE table and the token embedding are the same files in both repositories and are hard-linked, not
+# downloaded twice.  role: pack = the experts pack folder, dense = the dense GGUF (--native and
+# --native-dense-gguf), ple = the FP8 n-gram table (--ple-gguf), embd = the BF16 token embedding.
+_NVFP4_TOKENIZER = {
+    "pack/tokenizer/chat_template.jinja": ("pack", 8952, "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"),
+    "pack/tokenizer/merges.txt": ("pack", 3600844, "080cf95432173729d160346b7882bd2a644b07f7a3813a3eb73f4e66787bfde9"),
+    "pack/tokenizer/token_type.json": ("pack", 744960, "5088c8c298fc06af8382ddb3b76c888703ac2634e82263b97eedcc2ad202738b"),
+    "pack/tokenizer/tokenizer.json": ("pack", 554, "87be2ac47d8bc7393b7435df6ccd276740019a393941a2585d5edce59f450c54"),
+    "pack/tokenizer/vocab.json": ("pack", 5737005, "4ba64f0332abcfb0b600b7df1537d1e836e68009d5fb7cdb77339738dc6365c4"),
+}
+_NVFP4_SHARED = {
+    "ple-fp8.gguf": ("ple", 51200246176, "37f89b8ce5a3425932763257c40229ec02723ad2ab14b4bbfc26a486f4725c9c"),
+    "token-embd-bf16.gguf": ("embd", 1271398656, "386203af9070c7b43acb24ded8922876721d97bbad1a709b25cb49d694a7f51d"),
+}
+READY = {
+    "NVFP4": {
+        "repo": "Maximilian228/Qwen3.8-Flash-Next-NVFP4-GPTQ-Strata",
+        "revision": "640a1db97446ddd5e89d2b70ecd0297987192c93",
+        "files": {
+            "pack/dense.bin": ("pack", 1538035200, "974df6dcefcae85e3fd2c19fcc12eeaacaadde8261ab732d5af5af6ce2e25a7a"),
+            "pack/experts.bin": ("pack", 67948118016, "325e5e0d85c262a8d8278daf73b20696ec877d9a3ff584e57391fa69ad10bc64"),
+            "pack/index.txt": ("pack", 93663, "f62dc71e1c74a72794db54d3917bc71131cc6eae6f3dcdc3fdada48ff70f93ab"),
+            "pack/native_experts.txt": ("pack", 1599, "615f655fb28bf60b243664860b135710bf4177b111c6be89073e780a35de1018"),
+            **_NVFP4_TOKENIZER,
+            "qwen-nvfp4-gptq-dense.gguf": ("dense", 5991569472, "abdf74336b53d8f7ca3d99947f1eac8f19b8a544966750127cb61e561b127e3b"),
+            **_NVFP4_SHARED,
+        },
+    },
+    "NVFP4-NVIDIA": {
+        "repo": "Maximilian228/Qwen3.8-Flash-Next-NVIDIA-NVFP4-Strata",
+        "revision": "cca8f7fee5ce0af932097340a75e06df25c4e57d",
+        "files": {
+            "pack/dense.bin": ("pack", 1538625024, "1f1c2422069de292673ae6cee7d69f7090732dec69f3f125612a0de456279714"),
+            "pack/experts.bin": ("pack", 67948118016, "bb42080bb7585505b64d091d5a734c05376bbd6171406fa9688a46fbc261b957"),
+            "pack/index.txt": ("pack", 117490, "17793d1c5b187a73d3c1dc1677af4d4c9b23845394dd7e88bfa53396b41b77e3"),
+            "pack/native_experts.txt": ("pack", 1590, "d7f8b4372bb122f3d711030e5d522bff1c8746ac7d133a59a2cc7277283e59b6"),
+            **_NVFP4_TOKENIZER,
+            "qwen-nvidia-nvfp4-dense.gguf": ("dense", 5992176896, "0f795ca0cbb908e0cf2b894b30103e21455b5a05346a7ef79da208540cfd2be3"),
+            **_NVFP4_SHARED,
+        },
+    },
 }
 
 # The Unsloth shards' published sizes and SHA-256 at the pinned revision (the Hub's LFS pointers, as
@@ -173,6 +238,7 @@ SHA256 = {
 }
 
 UNSLOTH_RAM_LEFT_GB = 24   # RAM beside the budget: the OS, the engine, and the file cache the rest reads through
+RESIDENT_BESIDE_GB = 16    # experts and this much more fit the RAM: every expert stays in RAM, no budget flag
 
 
 def shard_count(fam: dict, quant: str) -> int:
@@ -196,9 +262,48 @@ def pack_args(fam: dict) -> list:
 
 def encoder_url(fam: dict) -> str:
     """The family's image encoder (its mmproj file) at the pinned revision of the repository that
-    publishes it - for the Unsloth files and the Coder, the original model's repository."""
+    publishes it - for the Unsloth files, the Coder and the NVFP4 packs, the original model's repository."""
     repo, name = fam["encoder"]
     return f"https://huggingface.co/{repo}/resolve/{HF_REVISIONS[repo]}/{name}"
+
+
+def ready_files(model: str) -> list:
+    """A ready-made pack's files as (role, repo, revision, path, bytes, sha256), as setup.py's ready_files."""
+    r = READY[model]
+    return [(role, r["repo"], r["revision"], path, size, sha)
+            for path, (role, size, sha) in r["files"].items()]
+
+
+def ready_url(f: tuple) -> str:
+    """One ready-made file at its pinned revision."""
+    _, repo, revision, path, _, _ = f
+    return f"https://huggingface.co/{repo}/resolve/{revision}/{path}"
+
+
+def ready_where(models: Path, f: tuple) -> Path:
+    """Where a ready-made file goes: <models>/<owner>--<repo>/<its path>, so the pack folder is whole."""
+    return Path(models) / f[1].replace("/", "--") / f[3]
+
+
+def ready_paths(model: str, models: Path) -> dict:
+    """What the engine is given: the pack folder and the dense, PLE and embedding GGUFs."""
+    out = {}
+    for f in ready_files(model):
+        p = ready_where(models, f)
+        if f[0] == "pack" and p.name == "index.txt":
+            out["pack"] = p.parent
+        elif f[0] in ("dense", "ple", "embd"):
+            out[f[0]] = p
+    return out
+
+
+def ready_model_args(paths: dict) -> list:
+    """The engine's model files for a ready-made pack (setup.py's ready branch): the dense GGUF is both
+    --native and --native-dense-gguf, so --native does not look for a second shard."""
+    return ["--pack", str(paths["pack"]),
+            "--native", str(paths["dense"]), "--native-dense-gguf", str(paths["dense"]),
+            "--ple-gguf", str(paths["ple"]),
+            "--embd-gguf", str(paths["embd"])]
 
 
 # The image encoder on the GPU (setup.py's VISION["gpu"]): it warms up before the engine - about 1.2 GB
@@ -225,10 +330,16 @@ def vision_section(exe: str, mmproj: str, model: str, max_tokens: int = VISION_I
 def resident_budget_gib(quant: dict, ram: float) -> int:
     """The GiB of experts the engine keeps in RAM (--resident-budget-gib): the RAM less 24 GB for the OS,
     the engine and the file cache the other experts are read through, at most all of them, at least 8.
-    64 GB: 40, the measured setting for UD-Q4_K_XL (docs/UNSLOTH_Q4.md); the cap (= every expert in RAM)
-    is what a big-RAM machine gets, where docs/UNSLOTH_Q6.md leaves the flag out - the same state."""
+    64 GB: 40, the measured setting for UD-Q4_K_XL (docs/UNSLOTH_Q4.md)."""
     all_experts = int(quant["arena_gb"] / 1.073741824)
     return max(8, min(round(ram) - UNSLOTH_RAM_LEFT_GB, all_experts))
+
+
+def budget_needed(quant: dict, ram: float) -> bool:
+    """Upstream's rule (setup.py's unsloth_budget): every expert stays in RAM when they and 16 GB more fit
+    this PC (no --resident-budget-gib, as ISTA's files); only below that does the RAM budget apply.  An
+    explicitly asked-for budget bypasses this."""
+    return ram < quant["arena_gb"] / 1.073741824 + RESIDENT_BESIDE_GB
 
 
 def say(msg=""):
@@ -321,11 +432,13 @@ def download(url: str, dst: Path, what: str, token=None) -> None:
     ok(f"{what} downloaded")
 
 
-def verify_sha256(shard: Path) -> None:
+def verify_sha256(shard: Path, want: tuple | None = None) -> None:
     """The published hash of a shard the Hub gives one for, once per file: the finish mark keeps it, so
     the hash is not recomputed (all of the Unsloth files together are 90-170 GB, ~15 minutes).  A file
-    with the wrong hash is deleted, so the next run downloads it again."""
-    want = SHA256.get(shard.name)
+    with the wrong hash is deleted, so the next run downloads it again.  `want` is an explicit
+    (bytes, sha256) for the ready-made packs, whose table is per model and not keyed by file name."""
+    if want is None:
+        want = SHA256.get(shard.name)
     if want is None:
         return
     size, sha = want
@@ -347,6 +460,39 @@ def verify_sha256(shard: Path) -> None:
              "the file was deleted: run again to download it once more")
     mark(shard, f"sha256 {sha}")
     ok(f"{shard.name} matches its published hash")
+
+
+def ready_verified(p: Path, sha: str) -> bool:
+    """Downloaded whole and checked: its finish mark holds the pinned SHA-256."""
+    m = p.with_name(p.name + ".done")
+    try:
+        return p.is_file() and f"sha256 {sha}" in m.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def ready_fetch(model: str, models: Path, token=None) -> None:
+    """Every file of a ready-made pack: already here and checked; the same file (by SHA-256) checked for
+    the other pack, linked instead of downloaded (the PLE table, the token embedding and the tokenizer);
+    or downloaded at its pinned revision and checked against its size and SHA-256."""
+    others = [(ready_where(models, g), g[5]) for m in READY for g in ready_files(m)]
+    for f in ready_files(model):
+        dst, size, sha = ready_where(models, f), f[4], f[5]
+        if ready_verified(dst, sha):
+            ok(f"{f[3]} already downloaded")
+            continue
+        src = next((p for p, s in others if s == sha and p != dst and ready_verified(p, s)), None)
+        if src is not None and not dst.exists():
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                os.link(src, dst)
+                mark(dst, f"sha256 {sha}")
+                ok(f"{f[3]}: the same file as {src} (linked, not downloaded again)")
+                continue
+            except OSError:
+                pass                                    # another drive: downloaded
+        download(ready_url(f), dst, f"{f[1].split('/')[-1]}: {f[3]}", token=token)
+        verify_sha256(dst, (size, sha))
 
 
 def check_shard(shard: Path) -> None:
@@ -387,10 +533,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--model", default="IQ2_XS", choices=sorted(QUANTS))
     ap.add_argument("--context", type=int, default=32768, choices=[8192, 32768, 65536, 131072, 262144])
     ap.add_argument("--data-dir", required=True)
-    ap.add_argument("--gguf-dir", help="a directory holding the family's shard files already downloaded")
+    ap.add_argument("--gguf-dir", help="a directory holding the family's shard files already downloaded (not NVFP4)")
     ap.add_argument("--low-ram", choices=["on", "off"], help="default: on when the experts would not fit the RAM")
     ap.add_argument("--resident-budget-gib", type=int,
-                    help="GiB of experts the engine keeps in RAM (the Unsloth files; default: the RAM less 24 GB)")
+                    help="GiB of experts the engine keeps in RAM (the Unsloth and NVFP4 files; default: the RAM less 24 GB)")
     ap.add_argument("--vision", action="store_true",
                     help="images too: fetch the family's mmproj and give serve the encoder")
     ap.add_argument("--vision-exe", help="the strata-vision binary to encode images with (with --vision)")
@@ -415,9 +561,13 @@ def main() -> int:
     a = parser().parse_args()
 
     fam, quant = FAMILIES[a.family], QUANTS[a.model]
+    ready = bool(fam.get("ready"))
     allowed = quant.get("families") or tuple(FAMILIES)
     if a.family not in allowed:
         fail(f"{a.model} is only published for: {', '.join(allowed)} (not {a.family})")
+    if ready and a.gguf_dir:
+        fail(f"{a.family} is a ready-made pack, not GGUF shards: --gguf-dir does not apply",
+             "its files go in <data-dir>/models; remove --gguf-dir")
     if a.vision and not a.vision_exe:
         fail("--vision needs --vision-exe: the strata-vision binary reads the pictures",
              "the NixOS module passes the bundle's own (package.passthru.vision)")
@@ -428,88 +578,107 @@ def main() -> int:
 
     data = Path(a.data_dir)
     models = data / "models"
-    pack = data / "packs" / (fam["tag"].lower() + a.model.lower())
+    pack = None if ready else data / "packs" / (fam["tag"].lower() + a.model.lower())
     mtp = data / "mtp"
     rt = mtp / "rt"
 
-    names = shard_names(fam, a.model)
-    if a.gguf_dir:
-        gdir = Path(a.gguf_dir)
-        shards = [gdir / n for n in names]
-        ok(f"using GGUF files from {gdir}")
+    if ready:
+        names, shards = [], []
     else:
-        shards = [models / n for n in names]
+        names = shard_names(fam, a.model)
+        if a.gguf_dir:
+            gdir = Path(a.gguf_dir)
+            shards = [gdir / n for n in names]
+            ok(f"using GGUF files from {gdir}")
+        else:
+            shards = [models / n for n in names]
 
     # decided before anything is downloaded: a wrong --low-ram for these files should not cost 170 GB first
     ram = mem_total_gb()
     budget = None
     if quant.get("budget"):
-        # the experts stay in the GGUF files and the engine reads them in place: no experts.bin, and the
-        # RAM that cannot hold all of them is handled by the budget instead of by low-RAM mode
+        # the experts stay in the model files and the engine reads them in place: no low-RAM mode, and the
+        # RAM that cannot hold all of them is handled by the budget instead
         if a.low_ram == "on":
-            fail(f"{a.model} has no low-RAM mode: its experts are read from the GGUF files in place",
+            fail(f"{a.model} has no low-RAM mode: its experts are read from the model files in place",
                  "--resident-budget-gib says how much of them the RAM holds")
         if a.resident_budget_gib is not None and a.resident_budget_gib <= 0:
             fail("--resident-budget-gib needs N > 0")
-        budget = a.resident_budget_gib if a.resident_budget_gib is not None else resident_budget_gib(quant, ram)
         low_ram = "off"
         all_gib = int(quant["arena_gb"] / 1.073741824)
-        ok(f"RAM budget: {budget} of the {all_gib} GiB of experts in RAM"
-           + (", the rest read from the SSD" if budget < all_gib else ", every one of them"))
+        if a.resident_budget_gib is not None or budget_needed(quant, ram):
+            budget = a.resident_budget_gib if a.resident_budget_gib is not None else resident_budget_gib(quant, ram)
+            ok(f"RAM budget: {budget} of the {all_gib} GiB of experts in RAM"
+               + (", the rest read from the SSD" if budget < all_gib else ", every one of them"))
+        else:
+            ok(f"all the {all_gib} GiB of experts in RAM (they and {RESIDENT_BESIDE_GB} GB more fit this "
+               f"machine's {ram:.0f} GB)")
     else:
         if a.resident_budget_gib is not None:
-            fail(f"--resident-budget-gib is one of the Unsloth files' settings; {a.model} keeps all of its "
-                 "experts in RAM (extra engine flags: --extra-arg)")
+            fail(f"--resident-budget-gib is one of the budget files' settings (the Unsloth and NVFP4 files); "
+                 f"{a.model} keeps all of its experts in RAM (extra engine flags: --extra-arg)")
         low_ram = (a.low_ram or "auto")
         if low_ram == "auto":
             low_ram = "on" if ram < quant["ram_gb"] else "off"
 
     token = Path(a.hf_token_file).read_text(encoding="utf-8").strip() if a.hf_token_file else None
-    if not a.gguf_dir:
-        for i, (n, s) in enumerate(zip(names, shards), 1):
-            download(shard_url(fam, a.model, n), s, f"{a.family}/{a.model} shard {i}/{len(names)}", token=token)
+    if ready:
+        ready_fetch(a.model, models, token=token)
+        paths = ready_paths(a.model, models)
+        pack, ple, vision_model = paths["pack"], paths["ple"], paths["dense"]
+        ok(f"ready-made pack: {pack}")
+    else:
+        if not a.gguf_dir:
+            for i, (n, s) in enumerate(zip(names, shards), 1):
+                download(shard_url(fam, a.model, n), s, f"{a.family}/{a.model} shard {i}/{len(names)}", token=token)
 
-    shard1 = shards[0]
-    for s in shards:
-        check_shard(s)      # whole and readable: cheap, so it comes before the hash
-        verify_sha256(s)    # the Hub's published hash, once per file
+        shard1 = shards[0]
+        vision_model = shard1
+        for s in shards:
+            check_shard(s)      # whole and readable: cheap, so it comes before the hash
+            verify_sha256(s)    # the Hub's published hash, once per file
 
     # the image encoder: 0.9 GB, hashed like a shard, and only wanted when the service takes pictures
     vision = None
     if a.vision:
         enc = fam["encoder"][1]
-        mmproj = (gdir if a.gguf_dir and (gdir / enc).is_file() else models) / enc
+        gdir = Path(a.gguf_dir) if a.gguf_dir else None
+        mmproj = (gdir if gdir is not None and (gdir / enc).is_file() else models) / enc
         if mmproj.parent == models:
             download(encoder_url(fam), mmproj, "vision encoder", token=token)
         verify_sha256(mmproj)
         tokens = VISION_IMAGE_TOKENS if a.vision_tokens is None else a.vision_tokens
-        vision = vision_section(a.vision_exe, mmproj, shard1, tokens)
+        vision = vision_section(a.vision_exe, mmproj, vision_model, tokens)
         ok(f"images: {enc} encoded by {a.vision_exe}")
         # the side of the largest square picture that reaches the encoder unshrunk: the number to look
         # at when a line of small text came back unreadable (1 image token = 32x32 px)
         ok(f"images: up to {tokens} image tokens per picture, the cap the encoder warms up at "
            f"(a {int((tokens * 1024) ** 0.5)} px square fits at native size)")
 
-    # the PLE table's shard: found by scanning the GGUF headers (shard 2 for qwen/coder, 1 for swift,
-    # a shard of its own - 3 - for the Unsloth 6-bit file)
-    import gguf_reader as G
-    ple = next((s for s in shards if any(t.name == "per_layer_token_embd.weight" for t in G.GGUFFile(s).tensors)),
-               None)
-    if ple is None:
-        fail("the model has no per_layer_token_embd tensor (is this a Qwen3.8-Flash-Next GGUF?)")
-
-    if not (pack / "native_experts.txt").exists() or not (pack / "tokenizer" / "vocab.json").exists():
-        say("[strata-prefetch] building the pack (iq_pack.py, a few minutes) ...")
-        run_tool("iq_pack.py", "--gguf", shard1, "--out", pack, *pack_args(fam))
-        ok(f"pack built: {pack}")
+    if ready:
+        # a ready-made pack has no GGUF shards to scan: it ships the FP8 n-gram table on its own
+        pass
     else:
-        ok(f"pack already built: {pack}")
+        # the PLE table's shard: found by scanning the GGUF headers (shard 2 for qwen/coder, 1 for swift,
+        # a shard of its own - 3 - for the Unsloth 6-bit file)
+        import gguf_reader as G
+        ple = next((s for s in shards if any(t.name == "per_layer_token_embd.weight" for t in G.GGUFFile(s).tensors)),
+                   None)
+        if ple is None:
+            fail("the model has no per_layer_token_embd tensor (is this a Qwen3.8-Flash-Next GGUF?)")
 
-    if low_ram == "on":
-        if not (pack / "experts.bin").exists():
-            say("[strata-prefetch] building the experts.bin file (low-RAM mode, a few minutes) ...")
-            run_tool("iq_pack.py", "--gguf", shard1, "--out", pack, "--experts-bin")
-        ok("low-RAM mode: the engine maps experts from the pack's experts.bin")
+        if not (pack / "native_experts.txt").exists() or not (pack / "tokenizer" / "vocab.json").exists():
+            say("[strata-prefetch] building the pack (iq_pack.py, a few minutes) ...")
+            run_tool("iq_pack.py", "--gguf", shard1, "--out", pack, *pack_args(fam))
+            ok(f"pack built: {pack}")
+        else:
+            ok(f"pack already built: {pack}")
+
+        if low_ram == "on":
+            if not (pack / "experts.bin").exists():
+                say("[strata-prefetch] building the experts.bin file (low-RAM mode, a few minutes) ...")
+                run_tool("iq_pack.py", "--gguf", shard1, "--out", pack, "--experts-bin")
+            ok("low-RAM mode: the engine maps experts from the pack's experts.bin")
 
     if not (rt / "experts.bin").exists():
         say("[strata-prefetch] fetching and packing the MTP draft layer (~5 GB, once) ...")
@@ -524,10 +693,12 @@ def main() -> int:
             shutil.copyfile(SHARE / "data" / "draft_vocab.bin", rt / "draft_vocab.bin")
         ok(f"MTP already prepared: {rt}")
 
+    if ready:
+        model_args = ready_model_args(paths)
+    else:
+        model_args = ["--pack", str(pack), "--native", str(shard1), "--ple-gguf", str(ple)]
     args = [
-        "--pack", str(pack),
-        "--native", str(shard1),
-        "--ple-gguf", str(ple),
+        *model_args,
         "--expert-profile", str(SHARE / "data" / fam["profile"]),
         "--expert-cache", "auto",
         "--prefill", "auto",
